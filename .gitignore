@@ -1,6 +1,7 @@
 # Databricks Asset Bundle files
 .databricks/
 
+
 # IDE files
 .vscode/
 .idea/
@@ -19,9 +20,23 @@ __pycache__/
 dist/
 build/
 
-# Jupyter Notebook checkpoints
-.ipynb_checkpoints/
-
-# Environment files
+# Virtual environments
+venv/
+env/
 .env
-.env.local 
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json

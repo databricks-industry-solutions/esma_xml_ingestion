@@ -1,0 +1,80 @@
+# EMIR (European Market Infrastructure Regulation) Job Definitions
+
+resources:
+  jobs:
+    EMIR_XML_Processing:
+      name: "EMIR XML Processing"
+      max_concurrent_runs: ${var.emir_max_concurrent_runs}
+      
+      tasks:
+        - task_key: emir_xml_load
+          notebook_task:
+            notebook_path: ../src/1_xml_file_loader_body.ipynb
+            source: WORKSPACE
+            
+        - task_key: emir_xml_flatten
+          depends_on:
+            - task_key: emir_xml_load
+          notebook_task:
+            notebook_path: ../src/2_flatten_explode_table.ipynb
+            source: WORKSPACE
+            
+      queue:
+        enabled: true
+        
+      parameters:
+        - name: table_prefix
+          default: "${var.emir_table_prefix}"
+        - name: catalog
+          default: "${var.emir_catalog}"
+        - name: raw_schema
+          default: "${var.emir_raw_schema}"
+        - name: bronze_schema
+          default: "${var.emir_bronze_schema}"
+        - name: checkpoint_path
+          default: "${var.emir_checkpoint_path}"
+        - name: landing_path
+          default: "${var.emir_landing_path}"
+        - name: processed_path
+          default: "${var.emir_processed_path}"
+        - name: row_tag
+          default: "${var.emir_row_tag}"
+        - name: xml_schema_hdr_pyld_metadata_path
+          default: "${var.emir_xml_schema_hdr_pyld_metadata_path}"
+        - name: xml_schema_pyld_path
+          default: "${var.emir_xml_schema_pyld_path}"
+        - name: xml_xsd_schema_pyld_path
+          default: "${var.emir_xml_xsd_schema_pyld_path}"
+
+    EMIR_Schema_Creation:
+      name: "EMIR Schema Creation"
+      max_concurrent_runs: ${var.emir_schema_max_concurrent_runs}
+      
+      tasks:
+        - task_key: emir_schema_generation
+          new_cluster:
+            is_single_node: true
+            data_security_mode: STANDARD
+            kind: CLASSIC_PREVIEW
+            spark_version: "${var.schema_spark_version}"
+            node_type_id: "${var.schema_node_type}"
+          notebook_task:
+            notebook_path: ../src/0_1_xml_schema_xsd.ipynb
+            source: WORKSPACE
+            
+      queue:
+        enabled: true
+        
+      parameters:
+        - name: schemas_path
+          default: "${var.emir_schemas_path}"
+        - name: master_xsd_path
+          default: "${var.emir_master_xsd_path}"
+        - name: payload_xsd_path
+          default: "${var.emir_payload_xsd_path}"
+        - name: row_tag
+          default: "${var.emir_row_tag}"
+        - name: schema_mappings_json
+          default: "${var.emir_schema_mappings_json}"
+         
+        

@@ -1,0 +1,128 @@
+# Development Variables (Local Configuration)
+# This file is git-ignored for local development
+
+variables:
+  
+  catalog:
+    description: "Target catalog - set per environment"
+    default: "esma"
+    
+  volume_path:
+    default: "/Volumes/${var.catalog}/default/regulatory_data"
+
+  schema_spark_version:
+    default: "16.4.x-scala2.12"
+    
+  schema_node_type:
+    default: "Standard_D4ds_v5"
+    
+  emir_max_concurrent_runs:
+    default: 10
+    
+  emir_table_prefix:
+    default: "emir"
+    
+  emir_catalog:
+    default: "${var.catalog}"
+    
+  emir_raw_schema:
+    default: "emir_raw"
+    
+  emir_bronze_schema:
+    default: "emir_bronze"
+    
+  emir_volume_path:
+    default: "${var.volume_path}"
+    
+  emir_landing_path:
+    default: "${var.volume_path}/emir/landing/"
+    
+  emir_checkpoint_path:
+    default: "${var.volume_path}/emir/checkpoints/"
+    
+  emir_processed_path:
+    default: "${var.volume_path}/emir/processed/"
+    
+  emir_row_tag:
+    default: "Stat"
+    
+  emir_xml_schema_hdr_pyld_metadata_path:
+    default: "${var.volume_path}/emir/schemas/hdr_pyld_metadata_schema.json"
+    
+  emir_xml_schema_pyld_path:
+    default: "${var.volume_path}/emir/schemas/pyld_schema.json"
+    
+  emir_xml_xsd_schema_pyld_path:
+    default: "${var.volume_path}/emir/schemas/row_tag_schema.xsd"
+  
+  # EMIR Schema Creation Job Variables
+  emir_schema_max_concurrent_runs:
+    default: 1
+    
+  emir_schemas_path:
+    default: "${var.volume_path}/emir/schemas/"
+    
+  emir_master_xsd_path:
+    default: "${var.volume_path}/emir/schemas/1 Header 003.xsd"
+    
+  emir_payload_xsd_path:
+    default: "${var.volume_path}/emir/schemas/EMIR_Refit-_Outgoing_auth_107_001_01_ESMAUG_DATTSR_1_1_0.xsd"
+    
+  emir_schema_mappings_json:
+    default: '[{"field": "Hdr", "file_path": "/Volumes/${var.catalog}/default/regulatory_data/emir/schemas/2 BusinessApplicationHeader 001.xsd"}, {"field": "Pyld", "file_path": "/Volumes/${var.catalog}/default/regulatory_data/emir/schemas/EMIR_Refit-_Outgoing_auth_107_001_01_ESMAUG_DATTSR_1_1_0.xsd", "payload": true}]'
+
+  # MiFIR Job Variables
+  mifir_max_concurrent_runs:
+    default: 10
+    
+  mifir_table_prefix:
+    default: "mifir"
+    
+  mifir_catalog:
+    default: "${var.catalog}"
+    
+  mifir_raw_schema:
+    default: "mifir_raw"
+    
+  mifir_bronze_schema:
+    default: "mifir_bronze"
+    
+  mifir_volume_path:
+    default: "${var.volume_path}"
+    
+  mifir_landing_path:
+    default: "${var.volume_path}/mifir/landing/"
+    
+  mifir_checkpoint_path:
+    default: "${var.volume_path}/mifir/checkpoints/"
+    
+  mifir_processed_path:
+    default: "${var.volume_path}/mifir/processed/"
+    
+  mifir_row_tag:
+    default: "Transaction"
+    
+  mifir_xml_schema_hdr_pyld_metadata_path:
+    default: "${var.volume_path}/mifir/schemas/hdr_pyld_metadata_schema.json"
+    
+  mifir_xml_schema_pyld_path:
+    default: "${var.volume_path}/mifir/schemas/pyld_schema.json"
+    
+  mifir_xml_xsd_schema_pyld_path:
+    default: "${var.volume_path}/mifir/schemas/row_tag_schema.xsd" 
+
+  # MiFIR Schema Creation Job Variables  
+  mifir_schema_max_concurrent_runs:
+    default: 1
+    
+  mifir_schemas_path:
+    default: "${var.volume_path}/mifir/schemas/"
+    
+  mifir_master_xsd_path:
+    default: "${var.volume_path}/mifir/schemas/Files_Wrapper_unavista_mifir_iso20022_001_001_001_vol.xsd"
+    
+  mifir_payload_xsd_path:
+    default: "${var.volume_path}/mifir/schemas/PayloadDocument_auth_016_001_01_ESMAUG_Reporting_1_1_0.xsd"
+    
+  mifir_schema_mappings_json:
+    default: '[{"field": "UVHeader", "file_path": "/Volumes/${var.catalog}/default/regulatory_data/mifir/schemas/Files_unavista_header_001_001_001.xsd"}, {"field": "BizAppHeader", "file_path": "/Volumes//default/regulatory_data/mifir/schemas/Files_BizAppheader_001_001_01.xsd"}, {"field": "Document", "file_path": "/Volumes/esma/default/regulatory_data/mifir/schemas/PayloadDocument_auth_016_001_01_ESMAUG_Reporting_1_1_0.xsd", "payload": true}]' 

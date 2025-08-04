@@ -1,0 +1,70 @@
+# TEMPLATE for New Regulatory Configuration
+# Copy this file and rename to: [regulation-name]-config.yml
+# Add corresponding variables to databricks.yml for the new regulation
+
+# Example: For SFTR regulation, you would:
+# 1. Copy this file to: sftr-config.yml
+# 2. Replace TEMPLATE with SFTR throughout
+# 3. Add to databricks.yml variables section:
+#    sftr_max_concurrent_runs:
+#      default: 6
+#    sftr_table_prefix:
+#      default: "sftr_"
+#    sftr_row_tag:
+#      default: "FinancingTransaction"
+
+resources:
+  jobs:
+    TEMPLATE_XML_Processing:  # Replace: [REGULATION_NAME]_XML_Processing
+      name: "TEMPLATE XML Processing"  # Replace: TEMPLATE with regulation name
+      max_concurrent_runs: "{{vars.template_max_concurrent_runs}}"  # Add this variable to databricks.yml
+      
+      tasks:
+        - task_key: template_xml_load  # Replace: template with regulation name
+          notebook_task:
+            notebook_path: ../src/notebooks/1_xml_file_loader_body
+            source: WORKSPACE
+            
+        - task_key: template_xml_flatten  # Replace: template with regulation name
+          depends_on:
+            - task_key: template_xml_load  # Match above task_key
+          notebook_task:
+            notebook_path: ../src/notebooks/2_flatten_explode_table
+            source: WORKSPACE
+            
+      queue:
+        enabled: true
+        
+      parameters:
+        - name: table_prefix
+          default: "{{vars.template_table_prefix}}"  # Add this variable to databricks.yml
+        - name: catalog
+          default: "{{vars.catalog}}"
+        - name: raw_schema
+          default: "{{vars.raw_schema}}"
+        - name: bronze_schema
+          default: "{{vars.bronze_schema}}"
+        - name: checkpoint_path
+          default: "{{vars.volume_path}}/template/checkpoints/"  # Replace: template
+        - name: landing_path
+          default: "{{vars.volume_path}}/template/landing/"      # Replace: template
+        - name: processed_path
+          default: "{{vars.volume_path}}/template/processed/"    # Replace: template
+        - name: row_tag
+          default: "{{vars.template_row_tag}}"  # Add this variable to databricks.yml
+        - name: xml_schema_hdr_pyld_metadata_path
+          default: "{{vars.volume_path}}/schemas/template/hdr_pyld_metadata_schema.json"  # Replace: template
+        - name: xml_schema_pyld_path
+          default: "{{vars.volume_path}}/schemas/template/pyld_schema.json"  # Replace: template
+        - name: xml_xsd_schema_pyld_path
+          default: "{{vars.volume_path}}/schemas/template/rowtag_schema.xsd"  # Replace: template
+
+# CHECKLIST for new regulation:
+# □ Copy this file to [regulation]-config.yml
+# □ Replace all instances of "TEMPLATE" and "template"
+# □ Add corresponding variables to databricks.yml:
+#   - [regulation]_max_concurrent_runs
+#   - [regulation]_table_prefix  
+#   - [regulation]_row_tag
+# □ Test deployment: databricks bundle deploy -t dev
+# □ Test execution: databricks bundle run [REGULATION_NAME]_XML_Processing -t dev 

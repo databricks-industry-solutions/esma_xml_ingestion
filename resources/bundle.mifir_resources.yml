@@ -1,0 +1,80 @@
+# MiFIR (Markets in Financial Instruments Regulation) Job Definitions
+
+resources:
+  jobs:
+    MiFIR_XML_Processing:
+      name: "MiFIR XML Processing"
+      max_concurrent_runs: ${var.mifir_max_concurrent_runs}
+      
+      tasks:
+        - task_key: mifir_xml_load
+          notebook_task:
+            notebook_path: ../src/1_xml_file_loader_body.ipynb
+            source: WORKSPACE
+            
+        - task_key: mifir_xml_flatten
+          depends_on:
+            - task_key: mifir_xml_load
+          notebook_task:
+            notebook_path: ../src/2_flatten_explode_table.ipynb
+            source: WORKSPACE
+            
+      queue:
+        enabled: true
+        
+      parameters:
+        - name: table_prefix
+          default: "${var.mifir_table_prefix}"
+        - name: catalog
+          default: "${var.mifir_catalog}"
+        - name: raw_schema
+          default: "${var.mifir_raw_schema}"
+        - name: bronze_schema
+          default: "${var.mifir_bronze_schema}"
+        - name: checkpoint_path
+          default: "${var.mifir_checkpoint_path}"
+        - name: landing_path
+          default: "${var.mifir_landing_path}"
+        - name: processed_path
+          default: "${var.mifir_processed_path}"
+        - name: row_tag
+          default: "${var.mifir_row_tag}"
+        - name: xml_schema_hdr_pyld_metadata_path
+          default: "${var.mifir_xml_schema_hdr_pyld_metadata_path}"
+        - name: xml_schema_pyld_path
+          default: "${var.mifir_xml_schema_pyld_path}"
+        - name: xml_xsd_schema_pyld_path
+          default: "${var.mifir_xml_xsd_schema_pyld_path}"
+
+    MiFIR_Schema_Creation:
+      name: "MiFIR Schema Creation"
+      max_concurrent_runs: ${var.mifir_schema_max_concurrent_runs}
+      
+      tasks:
+        - task_key: mifir_schema_generation
+          new_cluster:
+            is_single_node: true
+            data_security_mode: STANDARD
+            kind: CLASSIC_PREVIEW
+            spark_version: "${var.schema_spark_version}"
+            node_type_id: "${var.schema_node_type}"
+          notebook_task:
+            notebook_path: ../src/0_1_xml_schema_xsd.ipynb
+            source: WORKSPACE
+            
+      queue:
+        enabled: true
+        
+      parameters:
+        - name: schemas_path
+          default: "${var.mifir_schemas_path}"
+        - name: master_xsd_path
+          default: "${var.mifir_master_xsd_path}"
+        - name: payload_xsd_path
+          default: "${var.mifir_payload_xsd_path}"
+        - name: row_tag
+          default: "${var.mifir_row_tag}"
+        - name: schema_mappings_json
+          default: "${var.mifir_schema_mappings_json}"
+         
+        
