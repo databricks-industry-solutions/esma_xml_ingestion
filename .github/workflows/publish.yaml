@@ -4,6 +4,19 @@ on:
   push:
     branches: [ main, preview ]
   workflow_dispatch:
+    inputs:
+      split_markdown:
+        description: 'Split markdown files into sections'
+        type: boolean
+        default: true
+      markdown_split_level:
+        description: 'Heading level to split on (1=H1, 2=H2)'
+        type: choice
+        default: '2'
+        options:
+          - '1'
+          - '2'
+          - '3'
 
 permissions:
   contents: read
@@ -52,6 +65,9 @@ jobs:
           chmod +x .github/scripts/convert_notebooks.py
           python3 .github/scripts/convert_notebooks.py
           
+          # Make markdown splitter executable
+          chmod +x .github/scripts/split_markdown.py
+          
           # Create single-page application with embedded content
           python3 << 'EOF'
           import os
@@ -60,12 +76,46 @@ jobs:
           import re
           import glob
           from bs4 import BeautifulSoup
+          import sys
           
-          # Read README.md
+          # Add scripts directory to path
+          sys.path.insert(0, '.github/scripts')
+          from split_markdown import split_markdown_into_sections, create_section_navigation
+          
+          # Configuration from workflow inputs
+          split_markdown_enabled = '${{ github.event.inputs.split_markdown }}' == 'true' or '${{ github.event.inputs.split_markdown }}' == ''
+          markdown_split_level = int('${{ github.event.inputs.markdown_split_level }}' or '2')
+          
+          print(f"Markdown splitting: {'enabled' if split_markdown_enabled else 'disabled'}")
+          print(f"Split level: H{markdown_split_level}")
+          
+          # Read and process README.md
+          readme_sections = {}
           readme_content = ""
+          
           if os.path.exists('README.md'):
               with open('README.md', 'r') as f:
-                  readme_content = markdown.markdown(f.read())
+                  readme_raw = f.read()
+              
+              if split_markdown_enabled:
+                  readme_sections = split_markdown_into_sections(readme_raw, markdown_split_level)
+                  print(f"Split README into {len(readme_sections)} sections")
+              else:
+                  readme_content = markdown.markdown(readme_raw)
+          
+          # Read USER_GUIDE.md if it exists
+          user_guide_sections = {}
+          user_guide_content = ""
+          
+          if os.path.exists('USER_GUIDE.md'):
+              with open('USER_GUIDE.md', 'r') as f:
+                  user_guide_raw = f.read()
+              
+              if split_markdown_enabled:
+                  user_guide_sections = split_markdown_into_sections(user_guide_raw, markdown_split_level)
+                  print(f"Split USER_GUIDE into {len(user_guide_sections)} sections")
+              else:
+                  user_guide_content = markdown.markdown(user_guide_raw)
           
           # Get repository name and format title
           repo_name = os.environ.get('GITHUB_REPOSITORY', '').split('/')[-1]
@@ -217,6 +267,12 @@ jobs:
                       border-left-color: #E33417; 
                   }}
                   
+                  /* Sub-section indentation */
+                  .nav-link.subsection {{
+                      padding-left: 24px;
+                      font-size: 13px;
+                  }}
+                  
                   /* Content containment - prevent overflow */
                   .content-section {{ 
                       overflow-x: auto; 
@@ -324,8 +380,27 @@ jobs:
               
               <div class="main-container">
                   <div class="sidebar">
-                      <h3>📚 Documentation</h3>
-                      <div class="nav-link active" onclick="showSection('readme')">Overview</div>'''
+                      <h3>📚 Documentation</h3>'''
+          
+          # Add README navigation
+          if split_markdown_enabled and readme_sections:
+              # Split README sections
+              for section_id, section_data in sorted(readme_sections.items(), key=lambda x: x[1]['order']):
+                  indent = '  ' * (section_data['level'] - markdown_split_level)
+                  icon = '📖' if section_data['level'] == markdown_split_level else '📄'
+                  is_first = section_data['order'] == 1
+                  html += f'\n            <div class="nav-link{"" if not is_first else " active"}" onclick="showSection(\'readme-{section_id}\')">{indent}{icon} {section_data["title"]}</div>'
+          else:
+              # Single README section
+              html += '\n            <div class="nav-link active" onclick="showSection(\'readme\')">📖 Overview</div>'
+          
+          # Add USER_GUIDE navigation
+          if user_guide_sections:
+              html += '\n            <h3 style="margin-top: 30px;">📘 User Guide</h3>'
+              for section_id, section_data in sorted(user_guide_sections.items(), key=lambda x: x[1]['order']):
+                  indent = '  ' * (section_data['level'] - markdown_split_level)
+                  icon = '📘' if section_data['level'] == markdown_split_level else '📄'
+                  html += f'\n            <div class="nav-link" onclick="showSection(\'userguide-{section_id}\')">{indent}{icon} {section_data["title"]}</div>'
           
           # Add notebook navigation
           if notebooks:
@@ -337,10 +412,37 @@ jobs:
           html += f'''
                   </div>
                   
-                  <div class="content">
+                  <div class="content">'''
+          
+          # Add README sections
+          if split_markdown_enabled and readme_sections:
+              for section_id, section_data in sorted(readme_sections.items(), key=lambda x: x[1]['order']):
+                  is_first = section_data['order'] == 1
+                  html += f'''
+                      <!-- README: {section_data['title']} -->
+                      <div id="readme-{section_id}" class="content-section{"" if not is_first else " active"}">
+                          {section_data['content']}
+                      </div>'''
+          else:
+              html += f'''
                       <!-- README Section -->
                       <div id="readme" class="content-section active">
                           {readme_content}
+                      </div>'''
+          
+          # Add USER_GUIDE sections
+          if user_guide_sections:
+              for section_id, section_data in sorted(user_guide_sections.items(), key=lambda x: x[1]['order']):
+                  html += f'''
+                      <!-- USER_GUIDE: {section_data['title']} -->
+                      <div id="userguide-{section_id}" class="content-section">
+                          {section_data['content']}
+                      </div>'''
+          elif user_guide_content:
+              html += f'''
+                      <!-- USER_GUIDE Section -->
+                      <div id="userguide" class="content-section">
+                          {user_guide_content}
                       </div>'''
           
           # Add notebook sections
