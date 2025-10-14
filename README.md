@@ -2,7 +2,6 @@
 
 [![Databricks](https://img.shields.io/badge/Databricks-Solution_Accelerator-FF3621?style=for-the-badge&logo=databricks)](https://databricks.com)
 [![Unity Catalog](https://img.shields.io/badge/Unity_Catalog-Enabled-00A1C9?style=for-the-badge)](https://docs.databricks.com/en/data-governance/unity-catalog/index.html)
-[![Serverless](https://img.shields.io/badge/Serverless-Compute-00C851?style=for-the-badge)](https://docs.databricks.com/en/compute/serverless.html)
 
 This Databricks Asset Bundle provides a production-ready, cloud-agnostic solution for ingesting and processing complex XML files that comply with ESMA (European Securities and Markets Authority) requirements. Built through partnerships with Central Bank of Ireland (CBI) and London Stock Exchange Group (LSEG), this accelerator addresses common regulatory challenges in financial data processing.
 

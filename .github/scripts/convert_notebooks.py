@@ -71,6 +71,34 @@ def parse_databricks_notebook(filepath):
     return cells
 
 
+def extract_headers_from_markdown(md_content):
+    """Extract H2 and H3 headers from markdown content for navigation"""
+    headers = []
+    for line in md_content.split('\n'):
+        line = line.strip()
+        if line.startswith('## ') and not line.startswith('### '):
+            text = line[3:].strip()
+            # Create URL-safe ID
+            header_id = re.sub(r'[^\w\s-]', '', text.lower())
+            header_id = re.sub(r'[-\s]+', '-', header_id).strip('-')
+            headers.append({
+                'level': 2,
+                'text': text,
+                'id': header_id
+            })
+        elif line.startswith('### '):
+            text = line[4:].strip()
+            # Create URL-safe ID
+            header_id = re.sub(r'[^\w\s-]', '', text.lower())
+            header_id = re.sub(r'[-\s]+', '-', header_id).strip('-')
+            headers.append({
+                'level': 3,
+                'text': text,
+                'id': header_id
+            })
+    return headers
+
+
 def convert_to_html_fragment(filepath):
     """Convert Databricks .py notebook to HTML fragment with syntax highlighting"""
     filename = os.path.basename(filepath)
@@ -78,13 +106,18 @@ def convert_to_html_fragment(filepath):
     
     cells = parse_databricks_notebook(filepath)
     html_content = []
+    all_headers = []
     
     for i, cell in enumerate(cells):
         if cell['type'] == 'markdown':
-            # Convert markdown to HTML using nbconvert structure
+            # Extract headers for navigation
+            headers = extract_headers_from_markdown(cell['content'])
+            all_headers.extend(headers)
+            
+            # Convert markdown to HTML with header IDs
             md_html = markdown.markdown(
                 cell['content'], 
-                extensions=['fenced_code', 'tables', 'nl2br', 'toc']
+                extensions=['fenced_code', 'tables', 'nl2br', 'toc', 'attr_list']
             )
             html_content.append(f'''<div class="cell border-box-sizing text_cell rendered">
 <div class="inner_cell">
@@ -130,19 +163,23 @@ def convert_to_html_fragment(filepath):
     with open(temp_path, 'w') as f:
         f.write(fragment_content)
     
-    return name_without_ext, fragment_content
+    return name_without_ext, fragment_content, all_headers
 
 
 if __name__ == "__main__":
     # Process all .py files in src directory (your notebooks are there)
     notebook_data = {}
+    notebook_headers = {}
     for py_file in glob.glob('src/*.py'):
         if not py_file.endswith('__init__.py'):  # Skip __init__.py files
-            name, fragment = convert_to_html_fragment(py_file)
+            name, fragment, headers = convert_to_html_fragment(py_file)
             notebook_data[name] = fragment
-            print(f"Converted {py_file} to HTML fragment")
+            notebook_headers[name] = headers
+            print(f"Converted {py_file} to HTML fragment with {len(headers)} headers")
     
-    # Write notebook data to a JSON file for the main script
+    # Write notebook data to JSON files for the main script
     import json
     with open('notebook_fragments.json', 'w') as f:
         json.dump(notebook_data, f)
+    with open('notebook_headers.json', 'w') as f:
+        json.dump(notebook_headers, f)
