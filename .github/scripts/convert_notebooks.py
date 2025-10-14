@@ -5,6 +5,63 @@ import re
 import markdown
 import glob
 import html
+import json
+
+
+def extract_headings_from_notebook(filepath):
+    """Extract markdown headings from a notebook for navigation"""
+    cells = parse_databricks_notebook(filepath)
+    headings = []
+    
+    for cell in cells:
+        if cell['type'] == 'markdown':
+            # Extract headings from markdown content
+            lines = cell['content'].split('\n')
+            for line in lines:
+                # Match markdown headings: # Title, ## Title, ### Title
+                match = re.match(r'^(#{1,3})\s+(.+)$', line.strip())
+                if match:
+                    level = len(match.group(1))
+                    title = match.group(2).strip()
+                    anchor_id = create_anchor_id(title)
+                    headings.append({
+                        'level': level,
+                        'title': title,
+                        'anchor': anchor_id
+                    })
+    
+    return headings
+
+
+def create_anchor_id(title):
+    """Create a URL-safe anchor ID from a heading title"""
+    # Convert to lowercase, remove special chars, replace spaces with hyphens
+    anchor = title.lower()
+    anchor = re.sub(r'[^\w\s-]', '', anchor)
+    anchor = re.sub(r'[-\s]+', '-', anchor)
+    return anchor.strip('-')
+
+
+def add_anchor_ids_to_headings(md_content):
+    """Add HTML anchor IDs to markdown headings for in-page navigation"""
+    lines = md_content.split('\n')
+    processed_lines = []
+    
+    for line in lines:
+        # Match markdown headings
+        match = re.match(r'^(#{1,3})\s+(.+)$', line.strip())
+        if match:
+            hashes = match.group(1)
+            title = match.group(2).strip()
+            anchor_id = create_anchor_id(title)
+            # Add anchor as HTML: <h2 id="anchor-id">Title</h2>
+            # But keep markdown format with an HTML id attribute
+            processed_line = f'{hashes} <span id="{anchor_id}"></span>{title}'
+            processed_lines.append(processed_line)
+        else:
+            processed_lines.append(line)
+    
+    return '\n'.join(processed_lines)
 
 
 def parse_databricks_notebook(filepath):
@@ -37,6 +94,8 @@ def parse_databricks_notebook(filepath):
                     md_lines.append(line[7:])
             
             md_content = '\n'.join(md_lines)
+            # Add anchor IDs to headings for navigation
+            md_content = add_anchor_ids_to_headings(md_content)
             cells.append({'type': 'markdown', 'content': md_content})
         elif '# MAGIC %scala' in section:
             # Extract Scala code content

@@ -121,14 +121,21 @@ jobs:
           repo_name = os.environ.get('GITHUB_REPOSITORY', '').split('/')[-1]
           title = ' '.join(word.capitalize() for word in repo_name.split('-')) + ' Accelerator'
           
-          # Collect all notebook content
+          # Collect all notebook content and headers
           notebooks = {}
+          notebook_headers = {}
           
           # Read .py notebook fragments
           if os.path.exists('notebook_fragments.json'):
               with open('notebook_fragments.json', 'r') as f:
                   py_notebooks = json.load(f)
                   notebooks.update(py_notebooks)
+          
+          # Read notebook headers for sub-navigation
+          if os.path.exists('notebook_headers.json'):
+              with open('notebook_headers.json', 'r') as f:
+                  notebook_headers = json.load(f)
+                  print(f"Loaded navigation headers for {len(notebook_headers)} notebooks")
           
           # Read .ipynb notebook content (extract body from temp files)
           for temp_file in glob.glob('temp_*.html'):
@@ -158,6 +165,7 @@ jobs:
               <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet">
               <style>
                   * {{ box-sizing: border-box; }}
+                  html {{ scroll-behavior: smooth; }}
                   body {{ 
                       font-family: 'DM Sans', sans-serif; 
                       margin: 0; 
@@ -227,18 +235,25 @@ jobs:
                       background: #FFFFFF; 
                   }}
                   
-                  .content-section {{ 
-                      display: none; 
+                  .content-section, .notebook-section {{ 
                       background: #FFFFFF; 
                       border-radius: 12px; 
                       border: 1px solid #E3E3E3; 
                       padding: 32px; 
-                      margin: 0 auto; 
+                      margin: 0 auto 32px auto; 
                       max-width: 1200px; 
                       box-shadow: 0 4px 12px rgba(0,0,0,0.05); 
                   }}
                   
-                  .content-section.active {{ display: block; }}
+                  /* Anchor targets - scroll offset for fixed header */
+                  .notebook-section::before,
+                  [id]::before {{
+                      content: "";
+                      display: block;
+                      height: 90px;
+                      margin-top: -90px;
+                      visibility: hidden;
+                  }}
                   
                   .nav-link {{ 
                       display: block; 
@@ -384,15 +399,15 @@ jobs:
           
           # Add README navigation
           if split_markdown_enabled and readme_sections:
-              # Split README sections
+              # Split README sections with anchor links
               for section_id, section_data in sorted(readme_sections.items(), key=lambda x: x[1]['order']):
                   indent = '  ' * (section_data['level'] - markdown_split_level)
                   icon = '📖' if section_data['level'] == markdown_split_level else '📄'
                   is_first = section_data['order'] == 1
-                  html += f'\n            <div class="nav-link{"" if not is_first else " active"}" onclick="showSection(\'readme-{section_id}\')">{indent}{icon} {section_data["title"]}</div>'
+                  html += f'\n            <a href="#readme-{section_id}" class="nav-link{"" if not is_first else " active"}">{indent}{icon} {section_data["title"]}</a>'
           else:
               # Single README section
-              html += '\n            <div class="nav-link active" onclick="showSection(\'readme\')">📖 Overview</div>'
+              html += '\n            <a href="#readme" class="nav-link active">📖 Overview</a>'
           
           # Add USER_GUIDE navigation
           if user_guide_sections:
@@ -400,14 +415,22 @@ jobs:
               for section_id, section_data in sorted(user_guide_sections.items(), key=lambda x: x[1]['order']):
                   indent = '  ' * (section_data['level'] - markdown_split_level)
                   icon = '📘' if section_data['level'] == markdown_split_level else '📄'
-                  html += f'\n            <div class="nav-link" onclick="showSection(\'userguide-{section_id}\')">{indent}{icon} {section_data["title"]}</div>'
+                  html += f'\n            <a href="#userguide-{section_id}" class="nav-link">{indent}{icon} {section_data["title"]}</a>'
           
-          # Add notebook navigation
+          # Add notebook navigation with sub-sections
           if notebooks:
               html += '\n            <h3 style="margin-top: 30px;">📓 Notebooks</h3>'
               for name in sorted(notebooks.keys()):
                   display_name = name.replace('_', ' ').title()
-                  html += f'\n            <div class="nav-link" onclick="showSection(\'{name}\')">📓 {display_name}</div>'
+                  # Add main notebook link
+                  html += f'\n            <a href="#{name}" class="nav-link">📓 {display_name}</a>'
+                  
+                  # Add sub-navigation for notebook sections
+                  if name in notebook_headers and notebook_headers[name]:
+                      for header in notebook_headers[name]:
+                          indent = '  ' * (header['level'] - 1)
+                          icon = '📄' if header['level'] == 2 else '•'
+                          html += f'\n            <a href="#{header[\'id\']}" class="nav-link subsection" style="padding-left: {12 + header[\'level\'] * 8}px;">{indent}{icon} {header[\'text\']}</a>'
           
           html += f'''
                   </div>
@@ -445,11 +468,13 @@ jobs:
                           {user_guide_content}
                       </div>'''
           
-          # Add notebook sections
+          # Add notebook sections with anchor targets
           for name, content in notebooks.items():
+              display_name = name.replace('_', ' ').title()
               html += f'''
                       <!-- {name} Section -->
-                      <div id="{name}" class="content-section">
+                      <div id="{name}" class="notebook-section">
+                          <h2 style="margin-top: 80px; padding-top: 20px;">{display_name}</h2>
                           {content}
                       </div>'''
           
@@ -460,42 +485,48 @@ jobs:
               <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
               <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
               <script>
-                  function showSection(sectionId) {{
-                      // Hide all sections
-                      const sections = document.querySelectorAll('.content-section');
-                      sections.forEach(section => section.classList.remove('active'));
+                  // Highlight active nav link based on scroll position
+                  function updateActiveNavLink() {{
+                      const navLinks = document.querySelectorAll('.sidebar a.nav-link');
+                      const scrollPos = window.scrollY + 100; // Offset for header
                       
-                      // Remove active class from all nav links
-                      const navLinks = document.querySelectorAll('.nav-link');
-                      navLinks.forEach(link => link.classList.remove('active'));
+                      // Find the current section
+                      let currentSection = null;
+                      document.querySelectorAll('[id]').forEach(section => {{
+                          const sectionTop = section.offsetTop;
+                          if (scrollPos >= sectionTop) {{
+                              currentSection = section;
+                          }}
+                      }});
                       
-                      // Show target section
-                      const targetSection = document.getElementById(sectionId);
-                      if (targetSection) {{
-                          targetSection.classList.add('active');
-                          
-                          // Convert nbconvert code blocks to Prism format for highlighting
-                          const codeBlocks = targetSection.querySelectorAll('.highlight pre, .input_area pre');
-                          codeBlocks.forEach(block => {{
-                              if (!block.querySelector('code')) {{
-                                  // Wrap content in code element for Prism
-                                  const code = document.createElement('code');
-                                  code.className = 'language-python';
-                                  code.innerHTML = block.innerHTML;
-                                  block.innerHTML = '';
-                                  block.appendChild(code);
-                              }}
-                          }});
-                      }}
-                      
-                      // Add active class to clicked nav link
-                      event.target.classList.add('active');
-                      
-                      // Highlight all code blocks including newly formatted ones
-                      setTimeout(() => {{
-                          Prism.highlightAll();
-                      }}, 10);
+                      // Update active state
+                      navLinks.forEach(link => {{
+                          link.classList.remove('active');
+                          if (currentSection && link.getAttribute('href') === `#${{currentSection.id}}`) {{
+                              link.classList.add('active');
+                          }}
+                      }});
                   }}
+                  
+                  // Smooth scroll with offset for fixed header
+                  document.querySelectorAll('a[href^="#"]').forEach(anchor => {{
+                      anchor.addEventListener('click', function(e) {{
+                          e.preventDefault();
+                          const targetId = this.getAttribute('href').substring(1);
+                          const targetElement = document.getElementById(targetId);
+                          
+                          if (targetElement) {{
+                              const headerOffset = 90; // Height of fixed header + padding
+                              const elementPosition = targetElement.getBoundingClientRect().top;
+                              const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+                              
+                              window.scrollTo({{
+                                  top: offsetPosition,
+                                  behavior: 'smooth'
+                              }});
+                          }}
+                      }});
+                  }});
                   
                   // Initialize syntax highlighting on load
                   document.addEventListener('DOMContentLoaded', function() {{
@@ -512,6 +543,10 @@ jobs:
                       }});
                       
                       Prism.highlightAll();
+                      
+                      // Update active nav link on scroll
+                      window.addEventListener('scroll', updateActiveNavLink);
+                      updateActiveNavLink(); // Initial call
                   }});
               </script>
           </body>
