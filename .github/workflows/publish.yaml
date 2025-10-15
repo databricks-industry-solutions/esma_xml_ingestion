@@ -4,19 +4,6 @@ on:
   push:
     branches: [ main, preview ]
   workflow_dispatch:
-    inputs:
-      split_markdown:
-        description: 'Split markdown files into sections'
-        type: boolean
-        default: true
-      markdown_split_level:
-        description: 'Heading level to split on (1=H1, 2=H2)'
-        type: choice
-        default: '2'
-        options:
-          - '1'
-          - '2'
-          - '3'
 
 permissions:
   contents: read
@@ -65,57 +52,27 @@ jobs:
           chmod +x .github/scripts/convert_notebooks.py
           python3 .github/scripts/convert_notebooks.py
           
-          # Make markdown splitter executable
-          chmod +x .github/scripts/split_markdown.py
-          
-          # Create single-page application with embedded content
+          # Create multi-page application with collapsible navigation
           python3 << 'EOF'
           import os
           import json
           import markdown
-          import re
           import glob
           from bs4 import BeautifulSoup
-          import sys
           
-          # Add scripts directory to path
-          sys.path.insert(0, '.github/scripts')
-          from split_markdown import split_markdown_into_sections, create_section_navigation
-          
-          # Configuration from workflow inputs
-          split_markdown_enabled = '${{ github.event.inputs.split_markdown }}' == 'true' or '${{ github.event.inputs.split_markdown }}' == ''
-          markdown_split_level = int('${{ github.event.inputs.markdown_split_level }}' or '2')
-          
-          print(f"Markdown splitting: {'enabled' if split_markdown_enabled else 'disabled'}")
-          print(f"Split level: H{markdown_split_level}")
-          
-          # Read and process README.md
-          readme_sections = {}
+          # Read and process README.md as single page
           readme_content = ""
-          
           if os.path.exists('README.md'):
               with open('README.md', 'r') as f:
                   readme_raw = f.read()
-              
-              if split_markdown_enabled:
-                  readme_sections = split_markdown_into_sections(readme_raw, markdown_split_level)
-                  print(f"Split README into {len(readme_sections)} sections")
-              else:
-                  readme_content = markdown.markdown(readme_raw)
+              readme_content = markdown.markdown(readme_raw)
           
-          # Read USER_GUIDE.md if it exists
-          user_guide_sections = {}
+          # Read USER_GUIDE.md as single page if it exists
           user_guide_content = ""
-          
           if os.path.exists('USER_GUIDE.md'):
               with open('USER_GUIDE.md', 'r') as f:
                   user_guide_raw = f.read()
-              
-              if split_markdown_enabled:
-                  user_guide_sections = split_markdown_into_sections(user_guide_raw, markdown_split_level)
-                  print(f"Split USER_GUIDE into {len(user_guide_sections)} sections")
-              else:
-                  user_guide_content = markdown.markdown(user_guide_raw)
+              user_guide_content = markdown.markdown(user_guide_raw)
           
           # Get repository name and format title
           repo_name = os.environ.get('GITHUB_REPOSITORY', '').split('/')[-1]
@@ -235,24 +192,55 @@ jobs:
                       background: #FFFFFF; 
                   }}
                   
-                  .content-section, .notebook-section {{ 
+                  .content-section {{ 
+                      display: none;
                       background: #FFFFFF; 
                       border-radius: 12px; 
                       border: 1px solid #E3E3E3; 
                       padding: 32px; 
-                      margin: 0 auto 32px auto; 
+                      margin: 0 auto; 
                       max-width: 1200px; 
                       box-shadow: 0 4px 12px rgba(0,0,0,0.05); 
                   }}
                   
-                  /* Anchor targets - scroll offset for fixed header */
-                  .notebook-section::before,
-                  [id]::before {{
-                      content: "";
+                  .content-section.active {{
                       display: block;
-                      height: 90px;
-                      margin-top: -90px;
-                      visibility: hidden;
+                  }}
+                  
+                  /* Navigation items container */
+                  .nav-item {{
+                      margin: 2px 0;
+                  }}
+                  
+                  /* Collapsible subsections */
+                  .nav-subsections {{
+                      display: none;
+                      margin-left: 12px;
+                      margin-top: 4px;
+                  }}
+                  
+                  .nav-subsections.expanded {{
+                      display: block;
+                  }}
+                  
+                  .nav-sublink {{
+                      display: block;
+                      padding: 6px 12px;
+                      margin: 2px 0;
+                      text-decoration: none;
+                      color: #1B3139;
+                      border-radius: 6px;
+                      font-weight: 400;
+                      font-size: 13px;
+                      transition: all 0.2s;
+                      cursor: pointer;
+                      border-left: 3px solid transparent;
+                  }}
+                  
+                  .nav-sublink:hover {{
+                      background: #FFFFFF;
+                      border-left-color: #FF3621;
+                      transform: translateX(2px);
                   }}
                   
                   .nav-link {{ 
@@ -282,15 +270,12 @@ jobs:
                       border-left-color: #E33417; 
                   }}
                   
-                  /* Sub-section indentation */
-                  .nav-link.subsection {{
-                      padding-left: 24px;
-                      font-size: 13px;
+                  /* Content containment - prevent overflow */
+                  .content-section img, .content-section table, .content-section pre {{ 
+                      overflow-x: auto; 
                   }}
                   
-                  /* Content containment - prevent overflow */
                   .content-section {{ 
-                      overflow-x: auto; 
                       word-wrap: break-word; 
                       word-break: break-word; 
                   }}
@@ -397,88 +382,61 @@ jobs:
                   <div class="sidebar">
                       <h3>📚 Documentation</h3>'''
           
-          # Add README navigation
-          if split_markdown_enabled and readme_sections:
-              # Split README sections with anchor links
-              for section_id, section_data in sorted(readme_sections.items(), key=lambda x: x[1]['order']):
-                  indent = '  ' * (section_data['level'] - markdown_split_level)
-                  icon = '📖' if section_data['level'] == markdown_split_level else '📄'
-                  is_first = section_data['order'] == 1
-                  html += f'\n            <a href="#readme-{section_id}" class="nav-link{"" if not is_first else " active"}">{indent}{icon} {section_data["title"]}</a>'
-          else:
-              # Single README section
-              html += '\n            <a href="#readme" class="nav-link active">📖 Overview</a>'
+          # Add README navigation - single page
+          html += '\n            <div class="nav-link active" onclick="showPage(event, \'readme\')">📖 Overview</div>'
           
-          # Add USER_GUIDE navigation
-          if user_guide_sections:
-              html += '\n            <h3 style="margin-top: 30px;">📘 User Guide</h3>'
-              for section_id, section_data in sorted(user_guide_sections.items(), key=lambda x: x[1]['order']):
-                  indent = '  ' * (section_data['level'] - markdown_split_level)
-                  icon = '📘' if section_data['level'] == markdown_split_level else '📄'
-                  html += f'\n            <a href="#userguide-{section_id}" class="nav-link">{indent}{icon} {section_data["title"]}</a>'
+          # Add USER_GUIDE navigation - single page
+          if user_guide_content:
+              html += '\n            <div class="nav-link" onclick="showPage(event, \'userguide\')">📘 User Guide</div>'
           
-          # Add notebook navigation with sub-sections
+          # Add notebook navigation with collapsible sub-sections
           if notebooks:
               html += '\n            <h3 style="margin-top: 30px;">📓 Notebooks</h3>'
               for name in sorted(notebooks.keys()):
                   display_name = name.replace('_', ' ').title()
-                  # Add main notebook link
-                  html += f'\n            <a href="#{name}" class="nav-link">📓 {display_name}</a>'
                   
-                  # Add sub-navigation for notebook sections
+                  # Create collapsible nav item
+                  html += f'\n            <div class="nav-item" data-page="{name}">'
+                  html += f'\n                <div class="nav-link" onclick="showPage(event, \'{name}\')">📓 {display_name}</div>'
+                  
+                  # Add collapsible sub-navigation for notebook sections
                   if name in notebook_headers and notebook_headers[name]:
+                      html += f'\n                <div class="nav-subsections">'
                       for header in notebook_headers[name]:
                           header_id = header['id']
-                          header_level = header['level']
                           header_text = header['text']
-                          indent = '  ' * (header_level - 1)
+                          header_level = header['level']
                           icon = '📄' if header_level == 2 else '•'
-                          padding = 12 + header_level * 8
-                          html += f'\n            <a href="#{header_id}" class="nav-link subsection" style="padding-left: {padding}px;">{indent}{icon} {header_text}</a>'
+                          html += f'\n                    <a href="#{header_id}" class="nav-sublink" onclick="scrollToSection(event, \'{header_id}\')">{icon} {header_text}</a>'
+                      html += '\n                </div>'
+                  
+                  html += '\n            </div>'
           
           html += f'''
                   </div>
                   
                   <div class="content">'''
           
-          # Add README sections
-          if split_markdown_enabled and readme_sections:
-              for section_id, section_data in sorted(readme_sections.items(), key=lambda x: x[1]['order']):
-                  is_first = section_data['order'] == 1
-                  html += f'''
-                      <!-- README: {section_data['title']} -->
-                      <div id="readme-{section_id}" class="content-section{"" if not is_first else " active"}">
-                          {section_data['content']}
-                      </div>'''
-          else:
-              html += f'''
+          # Add README as single page - active by default
+          html += f'''
                       <!-- README Section -->
                       <div id="readme" class="content-section active">
                           {readme_content}
                       </div>'''
           
-          # Add USER_GUIDE sections
-          if user_guide_sections:
-              for section_id, section_data in sorted(user_guide_sections.items(), key=lambda x: x[1]['order']):
-                  html += f'''
-                      <!-- USER_GUIDE: {section_data['title']} -->
-                      <div id="userguide-{section_id}" class="content-section">
-                          {section_data['content']}
-                      </div>'''
-          elif user_guide_content:
+          # Add USER_GUIDE as single page if exists
+          if user_guide_content:
               html += f'''
                       <!-- USER_GUIDE Section -->
                       <div id="userguide" class="content-section">
                           {user_guide_content}
                       </div>'''
           
-          # Add notebook sections with anchor targets
+          # Add notebook sections as separate pages
           for name, content in notebooks.items():
-              display_name = name.replace('_', ' ').title()
               html += f'''
                       <!-- {name} Section -->
-                      <div id="{name}" class="notebook-section">
-                          <h2 style="margin-top: 80px; padding-top: 20px;">{display_name}</h2>
+                      <div id="{name}" class="content-section">
                           {content}
                       </div>'''
           
@@ -489,52 +447,67 @@ jobs:
               <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
               <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
               <script>
-                  // Highlight active nav link based on scroll position
-                  function updateActiveNavLink() {{
-                      const navLinks = document.querySelectorAll('.sidebar a.nav-link');
-                      const scrollPos = window.scrollY + 100; // Offset for header
-                      
-                      // Find the current section
-                      let currentSection = null;
-                      document.querySelectorAll('[id]').forEach(section => {{
-                          const sectionTop = section.offsetTop;
-                          if (scrollPos >= sectionTop) {{
-                              currentSection = section;
-                          }}
+                  // Show a specific page and manage collapsible navigation
+                  function showPage(event, pageId) {{
+                      // Hide all pages
+                      document.querySelectorAll('.content-section').forEach(section => {{
+                          section.classList.remove('active');
                       }});
                       
-                      // Update active state
-                      navLinks.forEach(link => {{
+                      // Show selected page
+                      const targetPage = document.getElementById(pageId);
+                      if (targetPage) {{
+                          targetPage.classList.add('active');
+                          
+                          // Scroll to top of content area
+                          window.scrollTo({{
+                              top: 0,
+                              behavior: 'smooth'
+                          }});
+                      }}
+                      
+                      // Collapse all subsections
+                      document.querySelectorAll('.nav-subsections').forEach(subsections => {{
+                          subsections.classList.remove('expanded');
+                      }});
+                      
+                      // Expand clicked page's subsections if it has any
+                      const navItem = document.querySelector('.nav-item[data-page="' + pageId + '"]');
+                      if (navItem) {{
+                          const subsections = navItem.querySelector('.nav-subsections');
+                          if (subsections) {{
+                              subsections.classList.add('expanded');
+                          }}
+                      }}
+                      
+                      // Update active nav link
+                      document.querySelectorAll('.nav-link').forEach(link => {{
                           link.classList.remove('active');
-                          if (currentSection && link.getAttribute('href') === '#' + currentSection.id) {{
-                              link.classList.add('active');
-                          }}
                       }});
+                      event.target.classList.add('active');
                   }}
                   
-                  // Smooth scroll with offset for fixed header
-                  document.querySelectorAll('a[href^="#"]').forEach(anchor => {{
-                      anchor.addEventListener('click', function(e) {{
-                          e.preventDefault();
-                          const targetId = this.getAttribute('href').substring(1);
-                          const targetElement = document.getElementById(targetId);
+                  // Scroll to a subsection within the current page
+                  function scrollToSection(event, sectionId) {{
+                      event.preventDefault();
+                      event.stopPropagation();
+                      
+                      const targetElement = document.getElementById(sectionId);
+                      if (targetElement) {{
+                          const headerOffset = 90;
+                          const elementPosition = targetElement.getBoundingClientRect().top;
+                          const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
                           
-                          if (targetElement) {{
-                              const headerOffset = 90; // Height of fixed header + padding
-                              const elementPosition = targetElement.getBoundingClientRect().top;
-                              const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
-                              
-                              window.scrollTo({{
-                                  top: offsetPosition,
-                                  behavior: 'smooth'
-                              }});
-                          }}
-                      }});
-                  }});
+                          window.scrollTo({{
+                              top: offsetPosition,
+                              behavior: 'smooth'
+                          }});
+                      }}
+                  }}
                   
-                  // Initialize syntax highlighting on load
+                  // Initialize syntax highlighting and setup on load
                   document.addEventListener('DOMContentLoaded', function() {{
-                      // Process all existing code blocks on page load
+                      // Process all code blocks for syntax highlighting
                       const allCodeBlocks = document.querySelectorAll('.highlight pre, .input_area pre');
                       allCodeBlocks.forEach(block => {{
                           if (!block.querySelector('code')) {{
@@ -547,20 +520,16 @@ jobs:
                       }});
                       
                       Prism.highlightAll();
-                      
-                      // Update active nav link on scroll
-                      window.addEventListener('scroll', updateActiveNavLink);
-                      updateActiveNavLink(); // Initial call
                   }});
               </script>
           </body>
           </html>'''
           
-          # Write the single-page application
+          # Write the multi-page application
           with open('site/index.html', 'w') as f:
               f.write(html)
           
-          print(f"Created single-page application with {len(notebooks)} notebooks")
+          print(f"Created multi-page application with {len(notebooks)} notebooks")
           
           # Clean up temporary files
           for temp_file in glob.glob('temp_*.html'):
