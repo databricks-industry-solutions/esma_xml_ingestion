@@ -2,28 +2,24 @@
 # MAGIC %md
 # MAGIC # XML Schema XSD Processing
 # MAGIC 
-# MAGIC ## What
-# MAGIC This notebook converts XML Schema Definition (XSD) files into JSON schemas that Apache Spark can use for structured XML data ingestion. It processes regulatory XML files by creating multiple schema artifacts: master schemas, payload schemas, and metadata schemas.
+# MAGIC This notebook converts XML Schema Definition (XSD) files into JSON schemas that Apache Spark can use for structured XML data ingestion. Apache Spark's XML reader requires schemas in JSON format rather than XSD, so this conversion enables type-safe parsing of complex regulatory XML documents while maintaining data validation rules.
 # MAGIC 
-# MAGIC ## Why
-# MAGIC Apache Spark's XML reader requires schemas in JSON format, not XSD. Converting XSD to JSON enables type-safe parsing of complex regulatory XML documents while maintaining data validation rules. This ensures data quality from the earliest stage of ingestion.
-# MAGIC 
-# MAGIC ## How
-# MAGIC The notebook uses Spark's XSDToSchema utility (Scala) to convert XSD files, then creates specialized Python schemas for different XML components (headers, payloads, metadata). These schemas are stored as JSON files for reuse across ingestion pipelines.
+# MAGIC The notebook processes regulatory XML files by creating multiple schema artifacts: master schemas for the overall document structure, payload schemas for business data, and metadata schemas for headers and control information. Using Spark's XSDToSchema utility (Scala), it converts XSD files and creates specialized Python schemas for different XML components. These schemas are stored as JSON files for reuse across ingestion pipelines, ensuring data quality from the earliest stage of ingestion.
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Configuration Parameters
 # MAGIC 
-# MAGIC **What:** Define paths and mappings for schema conversion
+# MAGIC Define the paths and mappings that control the schema conversion process:
 # MAGIC 
-# MAGIC **Parameters:**
 # MAGIC - `schemas_path`: Output directory for generated JSON schemas
 # MAGIC - `master_xsd_path`: Path to the main XSD file defining the overall document structure
 # MAGIC - `payload_xsd_path`: Path to the XSD containing business data definitions
 # MAGIC - `row_tag`: XML element name used as the row boundary for Spark reading (e.g., "Stat", "Tx")
 # MAGIC - `schema_mappings_json`: JSON array mapping XML fields to their XSD files
+# MAGIC 
+# MAGIC Configure these parameters based on your specific XML schema files and structure before running the notebook.
 
 # COMMAND ----------
 dbutils.widgets.text("schemas_path", "/Volumes/esma/default/regulatory_data/emir/schemas/")
@@ -37,7 +33,7 @@ dbutils.widgets.text("schema_mappings_json", '[{"field": "Hdr", "file_path": "/p
 # MAGIC %md
 # MAGIC ### Retrieve and Parse Parameters
 # MAGIC 
-# MAGIC Parse the schema mappings JSON to identify which XSD files correspond to header and payload sections of the XML documents.
+# MAGIC Parse the schema mappings JSON to identify which XSD files correspond to header and payload sections of the XML documents. This mapping tells the notebook how to separate metadata from business data.
 
 # COMMAND ----------
 
@@ -62,6 +58,15 @@ for mapping in schema_mappings:
     if mapping.get('payload'):
         print(f"    (Payload field)")
         payloadXsdPath = mapping['file_path']
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## XSD to JSON Schema Conversion (Scala)
+# MAGIC 
+# MAGIC Convert XSD files to JSON schemas using Spark's native XSD parser. Spark's `spark-xml` library includes a Scala-based XSD reader that understands complex XSD structures (imports, complex types, restrictions), ensuring accurate schema translation.
+# MAGIC 
+# MAGIC The Scala function reads each XSD file, parses it into a Spark StructType, and serializes it as JSON. This process runs for the master XSD, payload XSD, and any additional XSD files found in the schemas directory.
 
 # COMMAND ----------
 
@@ -148,15 +153,14 @@ for mapping in schema_mappings:
 # MAGIC %md
 # MAGIC ## Create Specialized Schemas
 # MAGIC 
-# MAGIC **What:** Generate two specialized schemas from the master schema:
+# MAGIC Generate two specialized schemas from the master schema to enable efficient data processing:
+# MAGIC 
 # MAGIC 1. `pyld_schema.json` - Contains only the payload (business data) structure
 # MAGIC 2. `hdr_pyld_metadata_schema.json` - Contains header and metadata fields
 # MAGIC 
-# MAGIC **Why:** Separating payload from metadata improves query performance and allows different processing strategies. Headers contain routing/control information while payloads contain the actual regulatory data records.
+# MAGIC Separating payload from metadata improves query performance and allows different processing strategies. Headers typically contain routing and control information (submission dates, sender IDs, file batching details), while payloads contain the actual regulatory data records (transactions, statements, reports).
 # MAGIC 
-# MAGIC **How:** The Python utility function extracts specific fields from the master schema based on the schema mappings, creating filtered schemas for targeted parsing.
-# MAGIC 
-# MAGIC **Example:** For EMIR data, the header might contain submission dates and sender IDs, while the payload contains transaction records.
+# MAGIC The Python utility function extracts specific fields from the master schema based on your schema mappings, creating filtered schemas for targeted parsing. For example, in EMIR data, the header contains submission metadata while the payload contains transaction records.
 
 # COMMAND ----------
 
@@ -187,13 +191,9 @@ else:
 # MAGIC %md
 # MAGIC ## Create Row Tag XSD
 # MAGIC 
-# MAGIC **What:** Extract a single repeating element (row tag) from the payload XSD and create a standalone XSD file for it
+# MAGIC Extract a single repeating element (row tag) from the payload XSD and create a standalone XSD file for validation. Spark's XML reader processes XML files by identifying a repeating element as "rows" in a DataFrame, and the row tag XSD enables row-level validation during streaming ingestion, catching malformed records before they enter your data lake.
 # MAGIC 
-# MAGIC **Why:** Spark's XML reader processes XML files by identifying a repeating element as "rows" in a DataFrame. The row tag XSD enables row-level validation during streaming ingestion, catching malformed records early.
-# MAGIC 
-# MAGIC **How:** The utility extracts the XML element definition matching the row tag name from the payload XSD, along with its type definition and dependencies. This creates a minimal, focused XSD for validation.
-# MAGIC 
-# MAGIC **Example:** For a row tag "Stat", this extracts the StatType definition and creates `row_tag_schema.xsd` containing only that structure.
+# MAGIC The utility extracts the XML element definition matching the row tag name from the payload XSD, along with its type definition and dependencies, creating a minimal, focused XSD for validation. For example, if your row tag is "Stat", this extracts the StatType definition and creates `row_tag_schema.xsd` containing only that structure for efficient validation.
 
 # COMMAND ----------
 

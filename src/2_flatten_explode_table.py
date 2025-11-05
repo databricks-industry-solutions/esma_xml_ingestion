@@ -2,27 +2,23 @@
 # MAGIC %md
 # MAGIC # Flatten and Explode Table Processing
 # MAGIC 
-# MAGIC ## What
-# MAGIC This notebook transforms nested XML structures from the raw table into flattened, normalized bronze tables. It recursively explodes arrays and nested structs, creating separate tables linked by foreign keys.
+# MAGIC This notebook transforms nested XML structures from the raw table into flattened, normalized bronze tables. Nested XML structures with multiple levels of arrays and structs are difficult to query efficiently in their original form. Flattening creates a relational model that enables faster analytics, simpler joins, and better performance for BI tools.
 # MAGIC 
-# MAGIC ## Why
-# MAGIC Nested XML structures are difficult to query efficiently. Flattening creates a relational model that enables faster analytics, simpler joins, and better performance for BI tools. Each level of nesting becomes its own table, preserving referential integrity while improving query performance.
-# MAGIC 
-# MAGIC ## How
-# MAGIC The notebook uses a recursive function to traverse the DataFrame schema, extracting simple fields, flattening structs, and exploding arrays. Each array generates a child table with a foreign key to its parent. Surrogate keys ensure uniqueness and enable efficient joins.
+# MAGIC The notebook uses a recursive function to traverse the DataFrame schema, extracting simple fields, flattening nested structs into columns, and exploding arrays into separate tables. Each level of nesting becomes its own table, with surrogate keys linking child tables to their parents. This preserves referential integrity while improving query performance and making the data more accessible to standard SQL and BI tools.
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Configuration Parameters
 # MAGIC 
-# MAGIC **What:** Define catalog names, schemas, and processing options for flattening
+# MAGIC Configure the flattening process by specifying source and destination locations:
 # MAGIC 
-# MAGIC **Key Parameters:**
-# MAGIC - `catalog` / `raw_schema`: Source location containing raw XML data
+# MAGIC - `catalog` / `raw_schema`: Source location containing raw XML data from the ingestion pipeline
 # MAGIC - `bronze_schema`: Destination schema for flattened bronze tables
-# MAGIC - `table_prefix`: Naming prefix for generated tables (e.g., "emir_")
-# MAGIC - `checkpoint_path`: Streaming checkpoint location for fault tolerance
+# MAGIC - `table_prefix`: Naming prefix for generated tables (e.g., "emir_") to organize related tables
+# MAGIC - `checkpoint_path`: Streaming checkpoint location for fault tolerance and recovery
+# MAGIC 
+# MAGIC Adjust these parameters based on your data organization strategy before running the notebook.
 
 # COMMAND ----------
 
@@ -39,6 +35,8 @@ dbutils.widgets.text("files_per_trigger", "16")
 
 # MAGIC %md
 # MAGIC ### Retrieve Parameters
+# MAGIC 
+# MAGIC Get the widget values and store them as Python variables for use throughout the notebook.
 
 # COMMAND ----------
 
@@ -56,11 +54,7 @@ files_per_trigger = int(dbutils.widgets.get("files_per_trigger"))
 # MAGIC %md
 # MAGIC ## Read Raw Table as Stream
 # MAGIC 
-# MAGIC **What:** Load the raw XML data from Delta Lake as a streaming DataFrame
-# MAGIC 
-# MAGIC **Why:** Streaming enables incremental processing of new data without reprocessing the entire history. As new XML files arrive and get written to the raw table, this stream automatically picks them up.
-# MAGIC 
-# MAGIC **How:** Use Delta streaming to read from the raw table created by the ingestion notebook.
+# MAGIC Load the raw XML data from Delta Lake as a streaming DataFrame. Streaming enables incremental processing of new data without reprocessing the entire history, which is crucial for efficiency as your data volume grows. As new XML files arrive and get written to the raw table by the ingestion pipeline, this stream automatically picks them up and processes only the new records.
 
 # COMMAND ----------
 
@@ -77,17 +71,15 @@ df = (
 # MAGIC %md
 # MAGIC ## Define Recursive Flattening Function
 # MAGIC 
-# MAGIC **What:** A function that recursively traverses nested DataFrames and generates a list of flattened table definitions
+# MAGIC Define the core function that recursively traverses nested DataFrames and generates a list of flattened table definitions. XML schemas can be deeply nested (structs within arrays within structs), so a recursive approach systematically processes each level, creating child tables as needed while preserving relationships.
 # MAGIC 
-# MAGIC **Why:** XML schemas can be deeply nested (structs within arrays within structs). A recursive approach systematically processes each level, creating child tables as needed while preserving relationships.
+# MAGIC For each DataFrame, the function:
+# MAGIC 1. Creates surrogate keys (`_sk`) using MD5 hashes to ensure uniqueness
+# MAGIC 2. Flattens struct fields into columns with dot-notation names (e.g., `Address_City`)
+# MAGIC 3. Explodes array fields into separate child tables with foreign keys back to the parent
+# MAGIC 4. Recursively processes child tables to handle deeply nested structures
 # MAGIC 
-# MAGIC **How:** For each DataFrame, the function:
-# MAGIC 1. Creates surrogate keys (_sk) using MD5 hashes for uniqueness
-# MAGIC 2. Flattens struct fields into columns
-# MAGIC 3. Explodes array fields into child tables with foreign keys
-# MAGIC 4. Recursively processes child tables
-# MAGIC 
-# MAGIC **Example:** A `Transaction` record containing an array of `Counterparties` becomes two tables: `transaction` (parent) and `transaction_Counterparties` (child), linked by `_parent_fk_transaction`.
+# MAGIC For example, a `Transaction` record containing an array of `Counterparties` becomes two tables: `transaction` (parent) and `transaction_Counterparties` (child), linked by the foreign key `_parent_fk_transaction`. This enables you to query transactions independently or join with counterparties as needed.
 
 # COMMAND ----------
 
@@ -222,9 +214,7 @@ def generate_flat_schemas(
 # MAGIC %md
 # MAGIC ## Generate Flattened Schema Structure
 # MAGIC 
-# MAGIC **What:** Apply the flattening function to the raw DataFrame schema
-# MAGIC 
-# MAGIC **Why:** This creates a blueprint of all tables to be generated, with their schemas and relationships defined.
+# MAGIC Apply the flattening function to the raw DataFrame schema to create a blueprint of all tables to be generated. This analysis phase determines the table structure and relationships before any data processing occurs, allowing you to understand the output schema before writing tables.
 
 # COMMAND ----------
 
@@ -240,11 +230,9 @@ df_list = generate_flat_schemas(df_schema, df, "", base_table_name)
 # MAGIC %md
 # MAGIC ## Define Table Creation Function
 # MAGIC 
-# MAGIC **What:** A function to write all flattened DataFrames to Delta tables using streaming writes
+# MAGIC Define a function to write all flattened DataFrames to Delta tables using streaming writes. Batch writing would require reprocessing all data each time the notebook runs, which becomes inefficient as data volumes grow. Streaming writes with checkpoints enable incremental processing and ensure exactly-once semantics, meaning no data is duplicated or lost even if the job fails midway.
 # MAGIC 
-# MAGIC **Why:** Batch writing would require reprocessing all data each time. Streaming writes with checkpoints enable incremental processing and ensure exactly-once semantics.
-# MAGIC 
-# MAGIC **How:** For each DataFrame in the flattened list, create a corresponding Delta table with a checkpoint location. The `availableNow` trigger processes all available data then stops.
+# MAGIC For each DataFrame in the flattened list, the function creates a corresponding Delta table with a dedicated checkpoint location. The `availableNow` trigger processes all available data and then stops, making it suitable for scheduled batch jobs.
 
 # COMMAND ----------
 
@@ -294,11 +282,9 @@ def create_all_flattened_tables(df_list, catalog, schema, table_prefix="",
 # MAGIC %md
 # MAGIC ## Execute Flattening Pipeline
 # MAGIC 
-# MAGIC **What:** Create all bronze tables by running the flattening function
+# MAGIC Execute the flattening pipeline by creating all bronze tables from the raw data. This is the final execution step that transforms raw nested XML data into queryable relational tables optimized for analytics.
 # MAGIC 
-# MAGIC **Why:** This is the final execution step that transforms raw nested data into queryable relational tables.
-# MAGIC 
-# MAGIC **How:** Call the table creation function with the list of flattened DataFrames, which writes them to the bronze schema with proper checkpointing.
+# MAGIC Call the table creation function with the list of flattened DataFrames, which writes them to the bronze schema with proper checkpointing for reliability. Monitor the output to see which tables are created and track processing progress.
 
 # COMMAND ----------
 
