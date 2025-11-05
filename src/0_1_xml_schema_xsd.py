@@ -2,68 +2,42 @@
 # MAGIC %md
 # MAGIC # XML Schema XSD Processing
 # MAGIC 
-# MAGIC This notebook creates JSON schemas and XSD files for XML processing
-
-# COMMAND ----------
-
-# MAGIC %load_ext autoreload
-# MAGIC %autoreload 2
-# Enables autoreload; learn more at https://docs.databricks.com/en/files/workspace-modules.html#autoreload-for-python-modules
-# To disable autoreload; run %autoreload 0
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Example Schema Mappings (Commented)
-
-# COMMAND ----------
-
-# schema_mappings = [ 
-#   {
-#   "field": "UVHeader",
-#   "file_path": "/Volumes/users/matthew_moorcroft/mifir/lseg_xsd/Files_unavista_header_001_001_001.xsd",
-#   },
-#   {
-#   "field": "BizAppHeader",
-#   "file_path": "/Volumes/users/matthew_moorcroft/mifir/lseg_xsd/Files_BizAppheader_001_001_01.xsd"
-#   },
-#   {
-#   "field": "Document",
-#   "file_path": "/Volumes/users/matthew_moorcroft/mifir/lseg_xsd/PayloadDocument_auth_016_001_01_ESMAUG_Reporting_1_1_0.xsd",
-#   "payload": True
-#   }
-# ]
-
-# COMMAND ----------
-
-# schema_mappings = [ 
-#   {
-#   "field": "Hdr",
-#   "file_path": "/Volumes/users/matthew_moorcroft/cbi/xsd/test/2 BusinessApplicationHeader 001.json",
-#   },
-#   {
-#   "field": "Pyld",
-#   "file_path": "/Volumes/users/matthew_moorcroft/cbi/xsd/test/EMIR_Refit-_Outgoing_auth_107_001_01_ESMAUG_DATTSR_1_1_0.json",
-#   "payload": True
-#   }
-# ]
+# MAGIC ## What
+# MAGIC This notebook converts XML Schema Definition (XSD) files into JSON schemas that Apache Spark can use for structured XML data ingestion. It processes regulatory XML files by creating multiple schema artifacts: master schemas, payload schemas, and metadata schemas.
+# MAGIC 
+# MAGIC ## Why
+# MAGIC Apache Spark's XML reader requires schemas in JSON format, not XSD. Converting XSD to JSON enables type-safe parsing of complex regulatory XML documents while maintaining data validation rules. This ensures data quality from the earliest stage of ingestion.
+# MAGIC 
+# MAGIC ## How
+# MAGIC The notebook uses Spark's XSDToSchema utility (Scala) to convert XSD files, then creates specialized Python schemas for different XML components (headers, payloads, metadata). These schemas are stored as JSON files for reuse across ingestion pipelines.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Schema Creation Job Parameters
+# MAGIC ## Configuration Parameters
+# MAGIC 
+# MAGIC **What:** Define paths and mappings for schema conversion
+# MAGIC 
+# MAGIC **Parameters:**
+# MAGIC - `schemas_path`: Output directory for generated JSON schemas
+# MAGIC - `master_xsd_path`: Path to the main XSD file defining the overall document structure
+# MAGIC - `payload_xsd_path`: Path to the XSD containing business data definitions
+# MAGIC - `row_tag`: XML element name used as the row boundary for Spark reading (e.g., "Stat", "Tx")
+# MAGIC - `schema_mappings_json`: JSON array mapping XML fields to their XSD files
 
 # COMMAND ----------
-
-# Schema Creation Job Parameters
-# This notebook creates JSON schemas and XSD files for XML processing
-
-# Declare parameters
 dbutils.widgets.text("schemas_path", "/Volumes/esma/default/regulatory_data/emir/schemas/")
 dbutils.widgets.text("master_xsd_path", "/Volumes/esma/default/regulatory_data/emir/xsd/master_schema.xsd")
 dbutils.widgets.text("payload_xsd_path", "/Volumes/esma/default/regulatory_data/emir/xsd/payload_schema.xsd")
 dbutils.widgets.text("row_tag", "Stat")
 dbutils.widgets.text("schema_mappings_json", '[{"field": "Hdr", "file_path": "/path/to/header.xsd"}, {"field": "Pyld", "file_path": "/path/to/payload.xsd", "payload": true}]')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Retrieve and Parse Parameters
+# MAGIC 
+# MAGIC Parse the schema mappings JSON to identify which XSD files correspond to header and payload sections of the XML documents.
 
 # COMMAND ----------
 
@@ -173,6 +147,16 @@ for mapping in schema_mappings:
 
 # MAGIC %md
 # MAGIC ## Create Specialized Schemas
+# MAGIC 
+# MAGIC **What:** Generate two specialized schemas from the master schema:
+# MAGIC 1. `pyld_schema.json` - Contains only the payload (business data) structure
+# MAGIC 2. `hdr_pyld_metadata_schema.json` - Contains header and metadata fields
+# MAGIC 
+# MAGIC **Why:** Separating payload from metadata improves query performance and allows different processing strategies. Headers contain routing/control information while payloads contain the actual regulatory data records.
+# MAGIC 
+# MAGIC **How:** The Python utility function extracts specific fields from the master schema based on the schema mappings, creating filtered schemas for targeted parsing.
+# MAGIC 
+# MAGIC **Example:** For EMIR data, the header might contain submission dates and sender IDs, while the payload contains transaction records.
 
 # COMMAND ----------
 
@@ -202,6 +186,14 @@ else:
 
 # MAGIC %md
 # MAGIC ## Create Row Tag XSD
+# MAGIC 
+# MAGIC **What:** Extract a single repeating element (row tag) from the payload XSD and create a standalone XSD file for it
+# MAGIC 
+# MAGIC **Why:** Spark's XML reader processes XML files by identifying a repeating element as "rows" in a DataFrame. The row tag XSD enables row-level validation during streaming ingestion, catching malformed records early.
+# MAGIC 
+# MAGIC **How:** The utility extracts the XML element definition matching the row tag name from the payload XSD, along with its type definition and dependencies. This creates a minimal, focused XSD for validation.
+# MAGIC 
+# MAGIC **Example:** For a row tag "Stat", this extracts the StatType definition and creates `row_tag_schema.xsd` containing only that structure.
 
 # COMMAND ----------
 
