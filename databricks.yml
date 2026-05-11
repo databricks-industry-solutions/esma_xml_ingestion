@@ -12,8 +12,20 @@ targets:
     default: true
     variables:
       catalog: "esma_dev"
-      
+    resources:
+      pipelines:
+        emir_xml_loader_pipeline:
+          development: true
+        mifir_xml_loader_pipeline:
+          development: true
+
   prod:
     mode: production
     variables:
       catalog: "esma_prod"
+    resources:
+      pipelines:
+        emir_xml_loader_pipeline:
+          development: false
+        mifir_xml_loader_pipeline:
+          development: false
