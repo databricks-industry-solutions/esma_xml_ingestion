@@ -22,14 +22,14 @@ resources:
       tasks:
         - task_key: template_xml_load  # Replace: template with regulation name
           notebook_task:
-            notebook_path: ../src/1_xml_file_loader_body.py
+            notebook_path: ../src/notebooks/1_xml_file_loader_body.py
             source: WORKSPACE
             
         - task_key: template_xml_flatten  # Replace: template with regulation name
           depends_on:
             - task_key: template_xml_load  # Match above task_key
           notebook_task:
-            notebook_path: ../src/2_flatten_explode_table.py
+            notebook_path: ../src/notebooks/2_flatten_explode_table.py
             source: WORKSPACE
             
       queue:
