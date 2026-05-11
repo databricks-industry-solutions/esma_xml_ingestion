@@ -142,7 +142,7 @@ git clone <repository-url>
 cd esma_xml_ingestion
 
 # Copy and customize development variables
-cp resources/config/production/prod-variables.yml resources/config/local/dev-variables.yml
+cp resources/config/local/dev-variables.yml.template resources/config/local/dev-variables.yml
 # Edit dev-variables.yml with your workspace-specific settings
 ```
 
