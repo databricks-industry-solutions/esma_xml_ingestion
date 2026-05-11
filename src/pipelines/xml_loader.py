@@ -37,9 +37,14 @@ WATERMARK_INTERVAL = spark.conf.get("watermark_interval", "15 minutes")
 
 # Fully qualified table names — published to {catalog}.{raw_schema}.
 TBL_RAW_XML_PAYLOAD = f"{CATALOG}.{RAW_SCHEMA}.{TABLE_PREFIX}_raw_xml_payload"
-TBL_FILE_HDR_METADATA = f"{CATALOG}.{RAW_SCHEMA}.{TABLE_PREFIX}_file_hdr_metadata"
 TBL_QUARANTINE = f"{CATALOG}.{RAW_SCHEMA}.{TABLE_PREFIX}_quarantine"
 TBL_RAW = f"{CATALOG}.{RAW_SCHEMA}.{TABLE_PREFIX}_raw"
+
+# Filename-regex patterns used inside the inline self-join in `raw` to
+# extract FileBatchIndex / FileBatchSize / FileVersion / ESMADate from
+# the source XML filename. Module-level so they're compiled once.
+_FILE_INDEX_PATTERN = r"\d\d\d\d\d\d-\d"
+_ESMA_DATE_PATTERN = r"-\d\d\d\d\d\d_"
 
 
 def _read_schema(file_path: str) -> StructType:
@@ -178,7 +183,7 @@ extract_hdr_pyld_metadata_udf = F.udf(_extract_hdr_pyld_metadata, StringType())
 
 
 # --------------------------------------------------------------------------
-# Table 1 of 4: {prefix}_raw_xml_payload (intermediate — internal use)
+# Table 1 of 3: {prefix}_raw_xml_payload (intermediate — internal use)
 #
 # Auto Loader reads XML files from the landing path. ALL rows (good +
 # corrupted) land here. Downstream tables filter on corrupted_record.
@@ -190,8 +195,7 @@ extract_hdr_pyld_metadata_udf = F.udf(_extract_hdr_pyld_metadata, StringType())
     comment=(
         "Internal: raw XML payload rows from Auto Loader, BEFORE good/bad "
         "split. Includes corrupted_record + rescued_data. Downstream tables "
-        f"{TBL_FILE_HDR_METADATA}, {TBL_QUARANTINE}, and {TBL_RAW} consume "
-        "this."
+        f"{TBL_QUARANTINE} and {TBL_RAW} consume this."
     ),
     cluster_by_auto=True,
 )
@@ -217,47 +221,80 @@ def raw_xml_payload():
 
 
 # --------------------------------------------------------------------------
-# Table 2 of 4: {prefix}_file_hdr_metadata (intermediate — internal use)
+# Table 2 of 3: {prefix}_quarantine (PUBLIC)
 #
-# One row per file. Built from good rows of raw_xml_payload via
-# dropDuplicates on file_path so the UDFs fire once per file per
-# trigger AND results emit immediately (the previous
-# dropDuplicatesWithinWatermark variant required the watermark to
-# advance past file_modification_time before emitting, which never
-# happened in a single triggered run when all events shared one
-# timestamp — causing emir_raw to be empty on first run).
-#
-# Tradeoff: dropDuplicates on a streaming source uses unbounded
-# state by default; here state grows by ONE entry per unique
-# file_path. For regulatory volumes (~thousands to millions of files
-# over months) this is comfortably bounded. If state ever becomes a
-# concern, switch to dropDuplicatesWithinWatermark with a much
-# shorter window (e.g., "5 minutes") and accept a one-batch emit
-# delay, or move to an @dp.create_auto_cdc_flow SCD pattern keyed on
-# file_path.
-#
-# Header XML is extracted with lxml and parsed via from_xml using
-# the pre-loaded JSON schema. Filename regex extracts FileBatchIndex
-# / Size / Version / ESMADate.
+# Bad rows from raw_xml_payload (corrupted_record IS NOT NULL),
+# enriched with a verbose XSD-validation error from the singleton-
+# cached lxml UDF. Public so Ops / data stewards can triage without
+# touching pipeline internals.
 # --------------------------------------------------------------------------
-
-_FILE_INDEX_PATTERN = r"\d\d\d\d\d\d-\d"
-_ESMA_DATE_PATTERN = r"-\d\d\d\d\d\d_"
 
 
 @dp.table(
-    name=TBL_FILE_HDR_METADATA,
+    name=TBL_QUARANTINE,
     comment=(
-        "Internal: one row per source XML file with parsed header struct "
-        "and filename-regex columns. Consumed by "
-        f"{TBL_RAW} for the per-row enrichment join."
+        "Public: malformed XML rows that failed Auto Loader XSD validation, "
+        "enriched with xsd_validation_result (human-readable lxml error)."
     ),
     cluster_by_auto=True,
 )
-def file_hdr_metadata():
+def quarantine():
     return (
         spark.readStream.table(TBL_RAW_XML_PAYLOAD)
+        .filter(F.col("corrupted_record").isNotNull())
+        .withColumn(
+            "xsd_validation_result",
+            xsd_error(F.col("corrupted_record"), F.lit(XML_XSD_SCHEMA_PYLD_PATH)),
+        )
+        .select(
+            "file_path",
+            "file_name",
+            "_file_modification_time",
+            "_ingested_at",
+            "corrupted_record",
+            "rescued_data",
+            "xsd_validation_result",
+        )
+    )
+
+
+# --------------------------------------------------------------------------
+# Table 3 of 3: {prefix}_raw (PUBLIC — drop-in for the flatten notebook)
+#
+# Self-joins payload rows with their per-file header metadata, deriving
+# BOTH sides from a single readStream of raw_xml_payload. This mirrors
+# the legacy notebook's pattern (where both join sides came from the
+# same streaming source) and avoids the cross-flow coordination issue
+# we hit with a separate file_hdr_metadata streaming table — emit on
+# the first triggered run, not the second.
+#
+# The header subquery deduplicates on file_path so the lxml UDF fires
+# once per file per trigger, then applies from_xml and the filename
+# regex (FileBatchIndex / FileBatchSize / FileVersion / ESMADate).
+#
+# Output preserves the column contract consumed by
+# src/notebooks/2_flatten_explode_table.py.
+# --------------------------------------------------------------------------
+
+
+@dp.table(
+    name=TBL_RAW,
+    comment=(
+        "Public: per-row payload joined with per-file header metadata "
+        "(extracted via lxml from the source XML). Drop-in replacement "
+        "for the output of the legacy 1_xml_file_loader_body.py notebook; "
+        "consumed by the flatten step."
+    ),
+    cluster_by_auto=True,
+)
+def raw():
+    payload = (
+        spark.readStream.table(TBL_RAW_XML_PAYLOAD)
         .filter(F.col("corrupted_record").isNull())
+    )
+
+    headers = (
+        payload.select("file_path", "file_name", "_file_modification_time")
         .dropDuplicates(["file_path"])
         .select(
             "file_path",
@@ -314,77 +351,8 @@ def file_hdr_metadata():
         )
     )
 
-
-# --------------------------------------------------------------------------
-# Table 3 of 4: {prefix}_quarantine (PUBLIC)
-#
-# Bad rows from raw_xml_payload (corrupted_record IS NOT NULL),
-# enriched with a verbose XSD-validation error from the singleton-
-# cached lxml UDF. Public so Ops / data stewards can triage without
-# touching pipeline internals.
-# --------------------------------------------------------------------------
-
-
-@dp.table(
-    name=TBL_QUARANTINE,
-    comment=(
-        "Public: malformed XML rows that failed Auto Loader XSD validation, "
-        "enriched with xsd_validation_result (human-readable lxml error)."
-    ),
-    cluster_by_auto=True,
-)
-def quarantine():
-    return (
-        spark.readStream.table(TBL_RAW_XML_PAYLOAD)
-        .filter(F.col("corrupted_record").isNotNull())
-        .withColumn(
-            "xsd_validation_result",
-            xsd_error(F.col("corrupted_record"), F.lit(XML_XSD_SCHEMA_PYLD_PATH)),
-        )
-        .select(
-            "file_path",
-            "file_name",
-            "_file_modification_time",
-            "_ingested_at",
-            "corrupted_record",
-            "rescued_data",
-            "xsd_validation_result",
-        )
-    )
-
-
-# --------------------------------------------------------------------------
-# Table 4 of 4: {prefix}_raw (PUBLIC — drop-in for the flatten notebook)
-#
-# Watermarked stream-stream join of good payload rows with file-level
-# headers on file_path. State is bounded by in-flight file count, not
-# row count, because both sides watermark on _file_modification_time.
-# Output preserves the column contract consumed by
-# src/notebooks/2_flatten_explode_table.py.
-# --------------------------------------------------------------------------
-
-
-@dp.table(
-    name=TBL_RAW,
-    comment=(
-        "Public: per-row payload joined with per-file header metadata. "
-        "Drop-in replacement for the output of the legacy "
-        "1_xml_file_loader_body.py notebook; consumed by the flatten step."
-    ),
-    cluster_by_auto=True,
-)
-def raw():
-    payload = (
-        spark.readStream.table(TBL_RAW_XML_PAYLOAD)
-        .filter(F.col("corrupted_record").isNull())
-        .withWatermark("_file_modification_time", WATERMARK_INTERVAL)
-    )
-    headers = (
-        spark.readStream.table(TBL_FILE_HDR_METADATA)
-        .withWatermark("_file_modification_time", WATERMARK_INTERVAL)
-    )
-    # Right-side join columns are aliased to avoid duplicate column names
-    # on file_path / file_name / _file_modification_time after the join.
+    # Right-side alias avoids duplicate file_path / file_name /
+    # _file_modification_time columns after the inner join.
     headers_aliased = headers.select(
         F.col("file_path").alias("_hdr_file_path"),
         "hdr_pyld_metadata",
@@ -393,6 +361,7 @@ def raw():
         "FileVersion",
         "ESMADate",
     )
+
     return (
         payload.join(
             headers_aliased,
