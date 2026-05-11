@@ -220,10 +220,25 @@ def raw_xml_payload():
 # Table 2 of 4: {prefix}_file_hdr_metadata (intermediate — internal use)
 #
 # One row per file. Built from good rows of raw_xml_payload via
-# watermark + dropDuplicatesWithinWatermark on file_path so the UDFs
-# fire once per file per trigger. Header XML is extracted with lxml
-# and parsed via from_xml using the pre-loaded JSON schema. Filename
-# regex extracts FileBatchIndex / Size / Version / ESMADate.
+# dropDuplicates on file_path so the UDFs fire once per file per
+# trigger AND results emit immediately (the previous
+# dropDuplicatesWithinWatermark variant required the watermark to
+# advance past file_modification_time before emitting, which never
+# happened in a single triggered run when all events shared one
+# timestamp — causing emir_raw to be empty on first run).
+#
+# Tradeoff: dropDuplicates on a streaming source uses unbounded
+# state by default; here state grows by ONE entry per unique
+# file_path. For regulatory volumes (~thousands to millions of files
+# over months) this is comfortably bounded. If state ever becomes a
+# concern, switch to dropDuplicatesWithinWatermark with a much
+# shorter window (e.g., "5 minutes") and accept a one-batch emit
+# delay, or move to an @dp.create_auto_cdc_flow SCD pattern keyed on
+# file_path.
+#
+# Header XML is extracted with lxml and parsed via from_xml using
+# the pre-loaded JSON schema. Filename regex extracts FileBatchIndex
+# / Size / Version / ESMADate.
 # --------------------------------------------------------------------------
 
 _FILE_INDEX_PATTERN = r"\d\d\d\d\d\d-\d"
@@ -243,8 +258,7 @@ def file_hdr_metadata():
     return (
         spark.readStream.table(TBL_RAW_XML_PAYLOAD)
         .filter(F.col("corrupted_record").isNull())
-        .withWatermark("_file_modification_time", WATERMARK_INTERVAL)
-        .dropDuplicatesWithinWatermark(["file_path"])
+        .dropDuplicates(["file_path"])
         .select(
             "file_path",
             "file_name",
