@@ -175,3 +175,42 @@ def _extract_hdr_pyld_metadata(file_path: str, row_tag: str) -> str | None:
 
 
 extract_hdr_pyld_metadata_udf = F.udf(_extract_hdr_pyld_metadata, StringType())
+
+
+# --------------------------------------------------------------------------
+# Table 1 of 4: {prefix}_raw_xml_payload (intermediate — internal use)
+#
+# Auto Loader reads XML files from the landing path. ALL rows (good +
+# corrupted) land here. Downstream tables filter on corrupted_record.
+# --------------------------------------------------------------------------
+
+
+@dp.table(
+    name=TBL_RAW_XML_PAYLOAD,
+    comment=(
+        "Internal: raw XML payload rows from Auto Loader, BEFORE good/bad "
+        "split. Includes corrupted_record + rescued_data. Downstream tables "
+        f"{TBL_FILE_HDR_METADATA}, {TBL_QUARANTINE}, and {TBL_RAW} consume "
+        "this."
+    ),
+    cluster_by=["AUTO"],
+)
+def raw_xml_payload():
+    return (
+        spark.readStream.format("cloudFiles")
+        .option("cloudFiles.format", "xml")
+        .option("rowTag", ROW_TAG)
+        .option("rowValidationXSDPath", XML_XSD_SCHEMA_PYLD_PATH)
+        .option("columnNameOfCorruptRecord", "corrupted_record")
+        .option("rescuedDataColumn", "rescued_data")
+        .option("mode", "PERMISSIVE")
+        .schema(XML_PYLD_SCHEMA)
+        .load(LANDING_PATH)
+        .withColumn("file_path", F.col("_metadata.file_path"))
+        .withColumn("file_name", F.col("_metadata.file_name"))
+        .withColumn(
+            "_file_modification_time",
+            F.col("_metadata.file_modification_time"),
+        )
+        .withColumn("_ingested_at", F.current_timestamp())
+    )
