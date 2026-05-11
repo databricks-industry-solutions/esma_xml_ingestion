@@ -299,3 +299,41 @@ def file_hdr_metadata():
             ),
         )
     )
+
+
+# --------------------------------------------------------------------------
+# Table 3 of 4: {prefix}_quarantine (PUBLIC)
+#
+# Bad rows from raw_xml_payload (corrupted_record IS NOT NULL),
+# enriched with a verbose XSD-validation error from the singleton-
+# cached lxml UDF. Public so Ops / data stewards can triage without
+# touching pipeline internals.
+# --------------------------------------------------------------------------
+
+
+@dp.table(
+    name=TBL_QUARANTINE,
+    comment=(
+        "Public: malformed XML rows that failed Auto Loader XSD validation, "
+        "enriched with xsd_validation_result (human-readable lxml error)."
+    ),
+    cluster_by=["AUTO"],
+)
+def quarantine():
+    return (
+        spark.readStream.table(TBL_RAW_XML_PAYLOAD)
+        .filter(F.col("corrupted_record").isNotNull())
+        .withColumn(
+            "xsd_validation_result",
+            xsd_error(F.col("corrupted_record"), F.lit(XML_XSD_SCHEMA_PYLD_PATH)),
+        )
+        .select(
+            "file_path",
+            "file_name",
+            "_file_modification_time",
+            "_ingested_at",
+            "corrupted_record",
+            "rescued_data",
+            "xsd_validation_result",
+        )
+    )
