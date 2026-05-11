@@ -33,7 +33,6 @@ ROW_TAG = spark.conf.get("row_tag")
 XML_SCHEMA_PYLD_PATH = spark.conf.get("xml_schema_pyld_path")
 XML_SCHEMA_HDR_PYLD_METADATA_PATH = spark.conf.get("xml_schema_hdr_pyld_metadata_path")
 XML_XSD_SCHEMA_PYLD_PATH = spark.conf.get("xml_xsd_schema_pyld_path")
-WATERMARK_INTERVAL = spark.conf.get("watermark_interval", "15 minutes")
 
 # Fully qualified table names — published to {catalog}.{raw_schema}.
 TBL_RAW_XML_PAYLOAD = f"{CATALOG}.{RAW_SCHEMA}.{TABLE_PREFIX}_raw_xml_payload"
