@@ -129,3 +129,9 @@ Pipeline `0994582e-eb59-4ecb-a4e0-4a0769bb08ae` (`[dev matthew_moorcroft] MiFIR 
 - Two follow-ups required, neither blocking:
   1. Catalog quota in `users` blocks the flatten regression — owner action to free schemas or repoint catalog.
   2. Document the watermarked stream-stream join behaviour for ops (`emir_raw` populates on the next batch after first ingestion).
+
+## Follow-up: fix watermarked-dedup blocking first-trigger emit (post-PR)
+
+Commit `cbda19c` replaces `withWatermark + dropDuplicatesWithinWatermark` in `file_hdr_metadata` with plain `dropDuplicates(["file_path"])`. Verified on E2: dropping the four tables + running the pipeline produces N=7 rows in `emir_raw` on the first triggered run (no second-batch ritual needed).
+
+Run ID after fix: `36110c41-69bf-427a-bbb4-35cb7fcdd83e`.
