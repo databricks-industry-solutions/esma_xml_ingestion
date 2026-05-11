@@ -56,3 +56,39 @@ def _read_schema(file_path: str) -> StructType:
 # Loaded once at pipeline-start.
 XML_PYLD_SCHEMA: StructType = _read_schema(XML_SCHEMA_PYLD_PATH)
 XML_HDR_PYLD_METADATA_SCHEMA: StructType = _read_schema(XML_SCHEMA_HDR_PYLD_METADATA_PATH)
+
+
+# --------------------------------------------------------------------------
+# XSD-validation UDF (used by the quarantine table only).
+#
+# The XSD schema object is compiled once per Python worker per XSD path
+# via _xsd_cache — Auto Loader's per-row XSD validation already runs
+# upstream; this UDF only fires on the small minority of rows that
+# already failed validation, where we want a human-readable error to
+# surface in the quarantine table.
+# --------------------------------------------------------------------------
+
+_xsd_cache: dict = {}
+
+
+def _get_xsd_schema(xsd_path: str):
+    """Compile and cache an lxml XMLSchema per path, once per worker."""
+    if xsd_path not in _xsd_cache:
+        from lxml import etree
+        with open(xsd_path, "rb") as f:
+            _xsd_cache[xsd_path] = etree.XMLSchema(etree.XML(f.read()))
+    return _xsd_cache[xsd_path]
+
+
+@F.udf(returnType=StringType())
+def xsd_error(xml_str: str, xsd_path: str) -> str:
+    """Return a verbose XSD-validation error message, or 'XML is valid'."""
+    from lxml import etree
+    try:
+        if xml_str is None:
+            return "Invalid XML: input is null"
+        schema = _get_xsd_schema(xsd_path)
+        schema.assertValid(etree.fromstring(xml_str.encode("utf-8")))
+        return "XML is valid"
+    except Exception as e:
+        return f"Invalid XML: {str(e)}"
