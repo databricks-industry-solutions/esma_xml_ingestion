@@ -135,3 +135,25 @@ Pipeline `0994582e-eb59-4ecb-a4e0-4a0769bb08ae` (`[dev matthew_moorcroft] MiFIR 
 Commit `cbda19c` replaces `withWatermark + dropDuplicatesWithinWatermark` in `file_hdr_metadata` with plain `dropDuplicates(["file_path"])`. Verified on E2: dropping the four tables + running the pipeline produces N=7 rows in `emir_raw` on the first triggered run (no second-batch ritual needed).
 
 Run ID after fix: `36110c41-69bf-427a-bbb4-35cb7fcdd83e`.
+
+## Follow-up #2: refactor emir_raw to inline self-join (post-PR)
+
+Commit `438dd13` drops the standalone `file_hdr_metadata` streaming
+table and moves the dedup + lxml UDF + filename regex INSIDE
+`emir_raw` as a self-join from a single `readStream` of
+`raw_xml_payload`. Mirrors the legacy notebook pattern (same
+streaming source on both sides of the join) and resolves the
+cross-flow coordination issue that caused emir_raw to need two
+trigger runs to emit.
+
+Verified on E2 (pipeline `cf609cf5-8a4e-4039-a6e8-711028a3efc7`,
+update `18bb0f8d-0486-4c44-8858-9812634d02de`): `emir_raw` populates
+with 7 rows on the FIRST triggered run.
+
+Final table set: 3 tables (no `emir_file_hdr_metadata`).
+
+| table | rows |
+|---|---|
+| `emir_raw_xml_payload` | 7 |
+| `emir_quarantine` | 0 |
+| `emir_raw` | 7 |
