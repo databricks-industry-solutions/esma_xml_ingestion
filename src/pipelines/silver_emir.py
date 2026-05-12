@@ -98,3 +98,45 @@ def submission_file():
             F.lit(REGULATION).alias("regulation"),
         )
     )
+
+
+# --------------------------------------------------------------------------
+# Table 2 of 4: trade_beneficiary (exploded array)
+# --------------------------------------------------------------------------
+
+
+@dp.table(
+    name=TBL_TRADE_BENEFICIARY,
+    comment=(
+        "Public: one row per beneficiary per trade. Exploded from "
+        "CtrPtySpcfcData.CtrPty.Bnfcry[]. beneficiary_type column "
+        "discriminates Lgl (legal entity, LEI) vs Ntrl (natural person)."
+    ),
+    cluster_by_auto=True,
+)
+def trade_beneficiary():
+    bronze = _reporting_date(spark.readStream.table(TBL_BRONZE))
+    exploded = (
+        bronze
+        .select(
+            F.col("CmonTradData.TxData.TxId.UnqTxIdr").alias("trade_id"),
+            F.col("reporting_date"),
+            F.col("_ingested_at"),
+            F.posexplode_outer(F.col("CtrPtySpcfcData.CtrPty.Bnfcry")).alias("sequence_no", "bnfcry"),
+        )
+        .filter(F.col("bnfcry").isNotNull())
+    )
+    return exploded.select(
+        "trade_id",
+        "reporting_date",
+        "sequence_no",
+        F.col("bnfcry.Lgl.Id.LEI").alias("beneficiary_lei"),
+        F.col("bnfcry.Lgl.Id.Othr.Id.Id").alias("beneficiary_other_id"),
+        F.col("bnfcry.Ntrl.Id.Id.Id").alias("beneficiary_natural_person_id"),
+        F.when(F.col("bnfcry.Lgl.Id.LEI").isNotNull(), F.lit("LEGAL"))
+         .when(F.col("bnfcry.Ntrl.Id.Id.Id").isNotNull(), F.lit("NATURAL"))
+         .otherwise(F.lit("OTHER"))
+         .alias("beneficiary_type"),
+        F.col("_ingested_at").alias("ingested_at"),
+        F.current_timestamp().alias("silver_processed_at"),
+    )
