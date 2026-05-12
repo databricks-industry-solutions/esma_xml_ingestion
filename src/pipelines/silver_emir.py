@@ -503,6 +503,138 @@ def trade():
         F.col(f"{txd}.Ccy.XchgRateBsis.CcyPair.QtdCcy").alias("xchg_quoted_ccy"),
         F.col(f"{txd}.Ccy.XchgRateBsis.Prtry").alias("xchg_rate_basis_proprietary"),
 
+        # === Lifecycle / risk-reduction / confirmation ===
+        F.col("CmonTradData.CtrctMod.ActnTp").alias("contract_modification_action_type"),
+        F.col("CmonTradData.CtrctMod.Lvl").alias("contract_modification_level"),
+        F.col(f"{txd}.Cmprssn").alias("is_compression"),
+        F.col(f"{txd}.PstTradRskRdctnFlg").alias("is_post_trade_risk_reduction"),
+        F.col(f"{txd}.PstTradRskRdctnEvt.Tchnq").alias("ptrr_technique"),
+        F.col(f"{txd}.PstTradRskRdctnEvt.SvcPrvdr.LEI").alias("ptrr_service_provider_lei"),
+        F.col(f"{txd}.DerivEvt.Tp").alias("deriv_event_type"),
+        F.col(f"{txd}.DerivEvt.Id.PstTradRskRdctnIdr.Strr").alias("deriv_event_ptrr_strr"),
+        F.col(f"{txd}.DerivEvt.Id.PstTradRskRdctnIdr.Id").alias("deriv_event_ptrr_id"),
+        F.col(f"{txd}.DerivEvt.TmStmp.Dt").alias("deriv_event_dt"),
+        F.coalesce(F.col(f"{txd}.TradConf.Confd.Tp"), F.col(f"{txd}.TradConf.NonConfd.Tp")).alias("trade_confirmation_type"),
+        F.col(f"{txd}.TradConf.Confd.TmStmp").alias("trade_confirmation_ts"),
+
+        # === Valuation (CtrPtySpcfcData.Valtn) ===
+        F.col("CtrPtySpcfcData.Valtn.CtrctVal.Amt._VALUE").alias("contract_value"),
+        F.col("CtrPtySpcfcData.Valtn.CtrctVal.Amt._Ccy").alias("contract_value_ccy"),
+        F.col("CtrPtySpcfcData.Valtn.CtrctVal.Sgn").alias("contract_value_sign"),
+        F.col("CtrPtySpcfcData.Valtn.Dlta").alias("delta"),
+        F.col("CtrPtySpcfcData.Valtn.TmStmp").alias("valuation_ts"),
+        F.col("CtrPtySpcfcData.Valtn.Tp").alias("valuation_type"),
+
+        # === Option attributes (TxData.Optn) ===
+        F.col(f"{txd}.Optn.Tp").alias("option_type"),
+        F.col(f"{txd}.Optn.ExrcStyle").alias("option_exercise_style"),
+        F.col(f"{txd}.Optn.StrkPric.MntryVal.Amt._VALUE").alias("option_strike_price"),
+        F.col(f"{txd}.Optn.StrkPric.MntryVal.Amt._Ccy").alias("option_strike_price_ccy"),
+        F.col(f"{txd}.Optn.PrmAmt._VALUE").alias("option_premium_amount"),
+        F.col(f"{txd}.Optn.PrmAmt._Ccy").alias("option_premium_ccy"),
+        F.col(f"{txd}.Optn.PrmPmtDt").alias("option_premium_payment_dt"),
+        F.col(f"{txd}.Optn.MtrtyDtOfUndrlyg").alias("option_underlying_maturity_dt"),
+
+        # === Credit derivative attributes (TxData.Cdt) ===
+        F.col(f"{txd}.Cdt.Snrty").alias("credit_seniority"),
+        F.col(f"{txd}.Cdt.RefPty.LEI").alias("credit_reference_party_lei"),
+        F.col(f"{txd}.Cdt.PmtFrqcy.Term.Unit").alias("credit_payment_freq_unit"),
+        F.col(f"{txd}.Cdt.PmtFrqcy.Term.Val").alias("credit_payment_freq_val"),
+        F.col(f"{txd}.Cdt.ClctnBsis").alias("credit_calculation_basis"),
+        F.col(f"{txd}.Cdt.Srs").alias("credit_series"),
+        F.col(f"{txd}.Cdt.Vrsn").alias("credit_version"),
+        F.col(f"{txd}.Cdt.IndxFctr").alias("credit_index_factor"),
+        F.col(f"{txd}.Cdt.Trch.AttchmntPt").alias("credit_tranche_attachment"),
+        F.col(f"{txd}.Cdt.Trch.DtchmntPt").alias("credit_tranche_detachment"),
+
+        # === Package transactions (TxData.Packg) ===
+        F.col(f"{txd}.Packg.CmplxTradId").alias("package_complex_trade_id"),
+        F.col(f"{txd}.Packg.Pric").alias("package_price"),
+        F.col(f"{txd}.Packg.Sprd").alias("package_spread"),
+
+        # === Other payments (TxData.OthrPmt[]) — ARRAY<STRUCT> ===
+        F.transform(
+            F.col(f"{txd}.OthrPmt"),
+            lambda p: F.struct(
+                p["Tp"].alias("payment_type"),
+                p["Amt"]["_VALUE"].alias("amount"),
+                p["Amt"]["_Ccy"].alias("ccy"),
+                p["Dt"].alias("payment_dt"),
+            ),
+        ).alias("other_payments"),
+
+        # === Commodity taxonomy (TxData.Cmmdty) — COALESCE'd promoted cols ===
+        F.coalesce(
+            F.col(f"{txd}.Cmmdty.Agrcltrl.BasePdct"),
+            F.col(f"{txd}.Cmmdty.Nrgy.BasePdct"),
+            F.col(f"{txd}.Cmmdty.Envttl.BasePdct"),
+            F.col(f"{txd}.Cmmdty.Frtlzr.BasePdct"),
+            F.col(f"{txd}.Cmmdty.Frght.BasePdct"),
+            F.col(f"{txd}.Cmmdty.Indx.BasePdct"),
+            F.col(f"{txd}.Cmmdty.IndstrlPdct.BasePdct"),
+            F.col(f"{txd}.Cmmdty.Infltn.BasePdct"),
+            F.col(f"{txd}.Cmmdty.Metl.BasePdct"),
+            F.col(f"{txd}.Cmmdty.MultiCmmdtyExtc.BasePdct"),
+            F.col(f"{txd}.Cmmdty.OffclEcnmcSttstcs.BasePdct"),
+            F.col(f"{txd}.Cmmdty.Othr.BasePdct"),
+            F.col(f"{txd}.Cmmdty.OthrC10.BasePdct"),
+            F.col(f"{txd}.Cmmdty.Ppr.BasePdct"),
+            F.col(f"{txd}.Cmmdty.Plprpln.BasePdct"),
+        ).alias("commodity_base_product"),
+        F.coalesce(
+            F.col(f"{txd}.Cmmdty.Agrcltrl.SubPdct"),
+            F.col(f"{txd}.Cmmdty.Nrgy.SubPdct"),
+            F.col(f"{txd}.Cmmdty.Envttl.SubPdct"),
+            F.col(f"{txd}.Cmmdty.Frtlzr.SubPdct"),
+            F.col(f"{txd}.Cmmdty.Frght.SubPdct"),
+            F.col(f"{txd}.Cmmdty.Indx.SubPdct"),
+            F.col(f"{txd}.Cmmdty.IndstrlPdct.SubPdct"),
+            F.col(f"{txd}.Cmmdty.Infltn.SubPdct"),
+            F.col(f"{txd}.Cmmdty.Metl.SubPdct"),
+            F.col(f"{txd}.Cmmdty.MultiCmmdtyExtc.SubPdct"),
+            F.col(f"{txd}.Cmmdty.OffclEcnmcSttstcs.SubPdct"),
+            F.col(f"{txd}.Cmmdty.Othr.SubPdct"),
+            F.col(f"{txd}.Cmmdty.OthrC10.SubPdct"),
+            F.col(f"{txd}.Cmmdty.Ppr.SubPdct"),
+            F.col(f"{txd}.Cmmdty.Plprpln.SubPdct"),
+        ).alias("commodity_sub_product"),
+        F.coalesce(
+            F.col(f"{txd}.Cmmdty.Agrcltrl.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.Nrgy.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.Envttl.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.Frtlzr.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.Frght.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.Indx.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.IndstrlPdct.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.Infltn.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.Metl.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.MultiCmmdtyExtc.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.OffclEcnmcSttstcs.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.Othr.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.OthrC10.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.Ppr.AddtlSubPdct"),
+            F.col(f"{txd}.Cmmdty.Plprpln.AddtlSubPdct"),
+        ).alias("commodity_additional_sub_product"),
+
+        # === Energy-specific (TxData.NrgySpcfcAttrbts) ===
+        F.col(f"{txd}.NrgySpcfcAttrbts.IntrCnnctnPt").alias("energy_interconnection_point"),
+        F.col(f"{txd}.NrgySpcfcAttrbts.LdTp").alias("energy_load_type"),
+        F.col(f"{txd}.NrgySpcfcAttrbts.DlvryPtOrZone").alias("energy_delivery_zones"),
+        F.col(f"{txd}.NrgySpcfcAttrbts.DlvryAttr").alias("energy_delivery_attributes"),
+
+        # === TechAttrbts ===
+        F.col("TechAttrbts.RcncltnFlg").alias("reconciliation_flag"),
+
+        # === Reporting metadata ===
+        F.col("CtrPtySpcfcData.RptgTmStmp").alias("reporting_ts"),
+        F.col("FileBatchIndex").cast("int").alias("batch_index"),
+        F.col("FileBatchSize").cast("int").alias("batch_size"),
+        F.col("FileVersion").cast("int").alias("file_version"),
+        F.col("hdr_pyld_metadata.Hdr.AppHdr.BizMsgIdr").alias("biz_msg_id"),
+        F.col("hdr_pyld_metadata.Hdr.AppHdr.Fr.OrgId.Id.OrgId.Othr.Id").alias("sender_lei"),
+        F.col("hdr_pyld_metadata.Hdr.AppHdr.To.OrgId.Id.OrgId.Othr.Id").alias("recipient_lei"),
+        F.col("hdr_pyld_metadata.Pyld.Document.DerivsTradStatRpt.TradData.DataSetActn").alias("data_set_action"),
+
         # === Audit / lineage ===
         F.col("reporting_date"),
         F.col("file_path"),
