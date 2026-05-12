@@ -140,3 +140,132 @@ def trade_beneficiary():
         F.col("_ingested_at").alias("ingested_at"),
         F.current_timestamp().alias("silver_processed_at"),
     )
+
+
+# --------------------------------------------------------------------------
+# Table 3 of 4: trade_schedule (six schedule arrays unified)
+#
+# Source paths:
+#   TxPric.SchdlPrd[]                     -> PRICE
+#   NtnlAmt.FrstLeg.SchdlPrd[]            -> NTNL_AMT_LEG_1
+#   NtnlAmt.ScndLeg.SchdlPrd[]            -> NTNL_AMT_LEG_2
+#   NtnlQty.FrstLeg.Dtls.SchdlPrd[]       -> NTNL_QTY_LEG_1
+#   NtnlQty.ScndLeg.Dtls.SchdlPrd[]       -> NTNL_QTY_LEG_2
+#   Optn.StrkPricSchdl[]                  -> STRIKE
+# --------------------------------------------------------------------------
+
+
+@dp.table(
+    name=TBL_TRADE_SCHEDULE,
+    comment=(
+        "Public: unified schedule periods across price, notional amount/qty "
+        "first/second legs, and option strike-price schedule. schedule_type "
+        "discriminator column says which source path each row came from."
+    ),
+    cluster_by_auto=True,
+)
+def trade_schedule():
+    bronze = _reporting_date(spark.readStream.table(TBL_BRONZE))
+    base = bronze.select(
+        F.col("CmonTradData.TxData.TxId.UnqTxIdr").alias("trade_id"),
+        F.col("reporting_date"),
+        F.col("_ingested_at"),
+        F.col("CmonTradData.TxData.TxPric.SchdlPrd").alias("_price_schdl"),
+        F.col("CmonTradData.TxData.NtnlAmt.FrstLeg.SchdlPrd").alias("_ntnl_amt_leg1"),
+        F.col("CmonTradData.TxData.NtnlAmt.ScndLeg.SchdlPrd").alias("_ntnl_amt_leg2"),
+        F.col("CmonTradData.TxData.NtnlQty.FrstLeg.Dtls.SchdlPrd").alias("_ntnl_qty_leg1"),
+        F.col("CmonTradData.TxData.NtnlQty.ScndLeg.Dtls.SchdlPrd").alias("_ntnl_qty_leg2"),
+        F.col("CmonTradData.TxData.Optn.StrkPricSchdl").alias("_strike_schdl"),
+    )
+
+    def _schedule(arr_col: str, schedule_type: str, mapper):
+        """Posexplode-outer one schedule array, apply a row-shape mapper."""
+        return (
+            base.select(
+                "trade_id", "reporting_date", "_ingested_at",
+                F.posexplode_outer(F.col(arr_col)).alias("sequence_no", "_row"),
+            )
+            .filter(F.col("_row").isNotNull())
+            .select(
+                "trade_id", "reporting_date", "_ingested_at", "sequence_no",
+                F.lit(schedule_type).alias("schedule_type"),
+                *mapper(F.col("_row")),
+            )
+        )
+
+    def _unified_cols(eff, end, amt, amt_ccy, amt_sgn, pct, qty):
+        return [
+            (eff or F.lit(None).cast("date")).alias("unadj_effective_dt"),
+            (end or F.lit(None).cast("date")).alias("unadj_end_dt"),
+            (amt or F.lit(None).cast("decimal(25,19)")).alias("amount"),
+            (amt_ccy or F.lit(None).cast("string")).alias("amount_ccy"),
+            (amt_sgn or F.lit(None).cast("boolean")).alias("amount_sign"),
+            (pct or F.lit(None).cast("decimal(11,10)")).alias("percentage"),
+            (qty or F.lit(None).cast("decimal(25,5)")).alias("quantity"),
+        ]
+
+    price_df = _schedule(
+        "_price_schdl", "PRICE",
+        lambda r: _unified_cols(
+            r["UadjstdFctvDt"], r["UadjstdEndDt"],
+            r["Pric"]["MntryVal"]["Amt"]["_VALUE"],
+            r["Pric"]["MntryVal"]["Amt"]["_Ccy"],
+            r["Pric"]["MntryVal"]["Sgn"],
+            r["Pric"]["Pctg"], None,
+        ),
+    )
+    ntnl_amt1_df = _schedule(
+        "_ntnl_amt_leg1", "NTNL_AMT_LEG_1",
+        lambda r: _unified_cols(
+            r["UadjstdFctvDt"], r["UadjstdEndDt"],
+            r["Amt"]["Amt"]["_VALUE"], r["Amt"]["Amt"]["_Ccy"], None,
+            None, None,
+        ),
+    )
+    ntnl_amt2_df = _schedule(
+        "_ntnl_amt_leg2", "NTNL_AMT_LEG_2",
+        lambda r: _unified_cols(
+            r["UadjstdFctvDt"], r["UadjstdEndDt"],
+            r["Amt"]["Amt"]["_VALUE"], r["Amt"]["Amt"]["_Ccy"], None,
+            None, None,
+        ),
+    )
+    ntnl_qty1_df = _schedule(
+        "_ntnl_qty_leg1", "NTNL_QTY_LEG_1",
+        lambda r: _unified_cols(
+            r["UadjstdFctvDt"], r["UadjstdEndDt"], None, None, None,
+            None, r["Qty"],
+        ),
+    )
+    ntnl_qty2_df = _schedule(
+        "_ntnl_qty_leg2", "NTNL_QTY_LEG_2",
+        lambda r: _unified_cols(
+            r["UadjstdFctvDt"], r["UadjstdEndDt"], None, None, None,
+            None, r["Qty"],
+        ),
+    )
+    # Note: StrkPricSchdl row shape is assumed to match
+    # {UadjstdFctvDt, UadjstdEndDt, StrkPric: {MntryVal: {Amt: {_VALUE, _Ccy}, Sgn}}}.
+    # If the actual bronze struct shape differs (it's product-specific),
+    # the pipeline run will fail with a clear "field not found in struct"
+    # error and the path here needs adjustment.
+    strike_df = _schedule(
+        "_strike_schdl", "STRIKE",
+        lambda r: _unified_cols(
+            r["UadjstdFctvDt"], r["UadjstdEndDt"],
+            r["StrkPric"]["MntryVal"]["Amt"]["_VALUE"],
+            r["StrkPric"]["MntryVal"]["Amt"]["_Ccy"],
+            r["StrkPric"]["MntryVal"]["Sgn"],
+            None, None,
+        ),
+    )
+
+    unioned = (
+        price_df
+        .unionByName(ntnl_amt1_df, allowMissingColumns=True)
+        .unionByName(ntnl_amt2_df, allowMissingColumns=True)
+        .unionByName(ntnl_qty1_df, allowMissingColumns=True)
+        .unionByName(ntnl_qty2_df, allowMissingColumns=True)
+        .unionByName(strike_df, allowMissingColumns=True)
+    )
+    return unioned.withColumn("silver_processed_at", F.current_timestamp())
