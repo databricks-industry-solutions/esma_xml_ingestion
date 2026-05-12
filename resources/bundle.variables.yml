@@ -55,6 +55,14 @@ variables:
     description: "Whether to enforce Auto Loader rowValidationXSDPath on EMIR XML. 'true' (default) or 'false' to bypass."
     default: "true"
 
+  emir_wholefile_row_tag:
+    description: "Document-root XML element used as Auto Loader rowTag in the wholefile pipeline (one Spark row per file)."
+    default: "BizData"
+
+  emir_stat_array_path:
+    description: "Dotted nested path from the wholefile_row_tag element down to the array of Stat elements, used as the argument to explode()."
+    default: "Pyld.Document.DerivsTradStatRpt.TradData.Stat"
+
   # EMIR Schema Creation Job Variables
   emir_schema_max_concurrent_runs:
     default: 1

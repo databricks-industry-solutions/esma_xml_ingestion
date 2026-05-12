@@ -16,6 +16,8 @@ targets:
       pipelines:
         emir_xml_loader_pipeline:
           development: true
+        emir_xml_loader_pipeline_wholefile:
+          development: true
         mifir_xml_loader_pipeline:
           development: true
 
@@ -26,6 +28,8 @@ targets:
     resources:
       pipelines:
         emir_xml_loader_pipeline:
+          development: false
+        emir_xml_loader_pipeline_wholefile:
           development: false
         mifir_xml_loader_pipeline:
           development: false

@@ -96,3 +96,37 @@ resources:
         xml_schema_hdr_pyld_metadata_path: ${var.emir_xml_schema_hdr_pyld_metadata_path}
         xml_xsd_schema_pyld_path: ${var.emir_xml_xsd_schema_pyld_path}
         enable_xsd_validation: ${var.emir_enable_xsd_validation}
+
+    # Experimental wholefile + explode variant — coexists with the
+    # row-tag pipeline above for direct throughput comparison on the
+    # 131 GB CBI landing volume. New tables are _wholefile-suffixed.
+    emir_xml_loader_pipeline_wholefile:
+      name: "EMIR XML Loader (wholefile + explode — experimental)"
+      catalog: ${var.emir_catalog}
+      schema: ${var.emir_raw_schema}
+      serverless: true
+      channel: PREVIEW
+      development: false
+      photon: true
+      continuous: false
+
+      libraries:
+        - file:
+            path: ../src/pipelines/xml_loader_wholefile.py
+
+      environment:
+        dependencies:
+          - lxml==5.3.0
+
+      configuration:
+        catalog: ${var.emir_catalog}
+        raw_schema: ${var.emir_raw_schema}
+        table_prefix: ${var.emir_table_prefix}
+        landing_path: ${var.emir_landing_path}
+        row_tag: ${var.emir_row_tag}
+        wholefile_row_tag: ${var.emir_wholefile_row_tag}
+        stat_array_path: ${var.emir_stat_array_path}
+        xml_schema_pyld_path: ${var.emir_xml_schema_pyld_path}
+        xml_schema_hdr_pyld_metadata_path: ${var.emir_xml_schema_hdr_pyld_metadata_path}
+        xml_xsd_schema_pyld_path: ${var.emir_xml_xsd_schema_pyld_path}
+        enable_xsd_validation: ${var.emir_enable_xsd_validation}
