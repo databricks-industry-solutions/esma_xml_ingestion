@@ -6,6 +6,8 @@
 #      (e.g., `csdr`, `sftr`)
 #   3. Replace every `New-Type` and `NEW_TYPE` with the appropriate case
 #   4. Add matching `${var.<prefix>_*}` defaults to bundle.variables.yml
+#      (including `<prefix>_enable_xsd_validation` for the Auto Loader
+#      XSD-validation toggle consumed by src/pipelines/xml_loader.py).
 #   5. (Optional) Add target overrides for development=true|false in
 #      databricks.yml under targets.{dev,prod}.resources.pipelines.
 
@@ -92,3 +94,4 @@ resources:
         xml_schema_pyld_path: ${var.new-type_xml_schema_pyld_path}
         xml_schema_hdr_pyld_metadata_path: ${var.new-type_xml_schema_hdr_pyld_metadata_path}
         xml_xsd_schema_pyld_path: ${var.new-type_xml_xsd_schema_pyld_path}
+        enable_xsd_validation: ${var.new-type_enable_xsd_validation}

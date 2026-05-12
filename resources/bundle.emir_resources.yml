@@ -95,3 +95,4 @@ resources:
         xml_schema_pyld_path: ${var.emir_xml_schema_pyld_path}
         xml_schema_hdr_pyld_metadata_path: ${var.emir_xml_schema_hdr_pyld_metadata_path}
         xml_xsd_schema_pyld_path: ${var.emir_xml_xsd_schema_pyld_path}
+        enable_xsd_validation: ${var.emir_enable_xsd_validation}

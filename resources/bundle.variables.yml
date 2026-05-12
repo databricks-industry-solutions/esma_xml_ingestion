@@ -50,7 +50,11 @@ variables:
     
   emir_xml_xsd_schema_pyld_path:
     default: "${var.volume_path}/emir/schemas/row_tag_schema.xsd"
-  
+
+  emir_enable_xsd_validation:
+    description: "Whether to enforce Auto Loader rowValidationXSDPath on EMIR XML. 'true' (default) or 'false' to bypass."
+    default: "true"
+
   # EMIR Schema Creation Job Variables
   emir_schema_max_concurrent_runs:
     default: 1
@@ -105,9 +109,13 @@ variables:
     default: "${var.volume_path}/mifir/schemas/pyld_schema.json"
     
   mifir_xml_xsd_schema_pyld_path:
-    default: "${var.volume_path}/mifir/schemas/row_tag_schema.xsd" 
+    default: "${var.volume_path}/mifir/schemas/row_tag_schema.xsd"
 
-  # MiFIR Schema Creation Job Variables  
+  mifir_enable_xsd_validation:
+    description: "Whether to enforce Auto Loader rowValidationXSDPath on MiFIR XML. 'true' (default) or 'false' to bypass."
+    default: "true"
+
+  # MiFIR Schema Creation Job Variables
   mifir_schema_max_concurrent_runs:
     default: 1
     

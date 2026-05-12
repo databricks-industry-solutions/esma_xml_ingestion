@@ -33,6 +33,10 @@ ROW_TAG = spark.conf.get("row_tag")
 XML_SCHEMA_PYLD_PATH = spark.conf.get("xml_schema_pyld_path")
 XML_SCHEMA_HDR_PYLD_METADATA_PATH = spark.conf.get("xml_schema_hdr_pyld_metadata_path")
 XML_XSD_SCHEMA_PYLD_PATH = spark.conf.get("xml_xsd_schema_pyld_path")
+# Pipeline-config values are always strings; "true"/"false" toggles row-level
+# XSD enforcement (rowValidationXSDPath) in raw_xml_payload and the xsd_error
+# UDF in quarantine. Default ON preserves production behavior.
+ENABLE_XSD_VALIDATION = spark.conf.get("enable_xsd_validation", "true").lower() == "true"
 
 # Fully qualified table names — published to {catalog}.{raw_schema}.
 TBL_RAW_XML_PAYLOAD = f"{CATALOG}.{RAW_SCHEMA}.{TABLE_PREFIX}_raw_xml_payload"
@@ -186,6 +190,11 @@ extract_hdr_pyld_metadata_udf = F.udf(_extract_hdr_pyld_metadata, StringType())
 #
 # Auto Loader reads XML files from the landing path. ALL rows (good +
 # corrupted) land here. Downstream tables filter on corrupted_record.
+#
+# When ENABLE_XSD_VALIDATION is False, rowValidationXSDPath is omitted
+# so XSD pattern facets (e.g. LEI [A-Z0-9]{18}[0-9]{2}) are not enforced
+# at row level. Rows that still fail JSON-schema parsing remain captured
+# in corrupted_record and route to the quarantine table.
 # --------------------------------------------------------------------------
 
 
@@ -199,14 +208,18 @@ extract_hdr_pyld_metadata_udf = F.udf(_extract_hdr_pyld_metadata, StringType())
     cluster_by_auto=True,
 )
 def raw_xml_payload():
-    return (
+    loader = (
         spark.readStream.format("cloudFiles")
         .option("cloudFiles.format", "xml")
         .option("rowTag", ROW_TAG)
-        .option("rowValidationXSDPath", XML_XSD_SCHEMA_PYLD_PATH)
         .option("columnNameOfCorruptRecord", "corrupted_record")
         .option("rescuedDataColumn", "rescued_data")
         .option("mode", "PERMISSIVE")
+    )
+    if ENABLE_XSD_VALIDATION:
+        loader = loader.option("rowValidationXSDPath", XML_XSD_SCHEMA_PYLD_PATH)
+    return (
+        loader
         .schema(XML_PYLD_SCHEMA)
         .load(LANDING_PATH)
         .withColumn("file_path", F.col("_metadata.file_path"))
@@ -226,6 +239,11 @@ def raw_xml_payload():
 # enriched with a verbose XSD-validation error from the singleton-
 # cached lxml UDF. Public so Ops / data stewards can triage without
 # touching pipeline internals.
+#
+# When ENABLE_XSD_VALIDATION is False, the xsd_error UDF is skipped
+# (it would fail trying to read the XSD) and xsd_validation_result is
+# the literal "XSD validation disabled"; quarantined rows in that mode
+# come only from JSON-schema parse failures, not XSD pattern violations.
 # --------------------------------------------------------------------------
 
 
@@ -238,22 +256,28 @@ def raw_xml_payload():
     cluster_by_auto=True,
 )
 def quarantine():
-    return (
+    bad_rows = (
         spark.readStream.table(TBL_RAW_XML_PAYLOAD)
         .filter(F.col("corrupted_record").isNotNull())
-        .withColumn(
+    )
+    if ENABLE_XSD_VALIDATION:
+        bad_rows = bad_rows.withColumn(
             "xsd_validation_result",
             xsd_error(F.col("corrupted_record"), F.lit(XML_XSD_SCHEMA_PYLD_PATH)),
         )
-        .select(
-            "file_path",
-            "file_name",
-            "_file_modification_time",
-            "_ingested_at",
-            "corrupted_record",
-            "rescued_data",
+    else:
+        bad_rows = bad_rows.withColumn(
             "xsd_validation_result",
+            F.lit("XSD validation disabled"),
         )
+    return bad_rows.select(
+        "file_path",
+        "file_name",
+        "_file_modification_time",
+        "_ingested_at",
+        "corrupted_record",
+        "rescued_data",
+        "xsd_validation_result",
     )
 
 
