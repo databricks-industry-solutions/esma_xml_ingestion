@@ -195,13 +195,13 @@ def trade_schedule():
 
     def _unified_cols(eff, end, amt, amt_ccy, amt_sgn, pct, qty):
         return [
-            (eff or F.lit(None).cast("date")).alias("unadj_effective_dt"),
-            (end or F.lit(None).cast("date")).alias("unadj_end_dt"),
-            (amt or F.lit(None).cast("decimal(25,19)")).alias("amount"),
-            (amt_ccy or F.lit(None).cast("string")).alias("amount_ccy"),
-            (amt_sgn or F.lit(None).cast("boolean")).alias("amount_sign"),
-            (pct or F.lit(None).cast("decimal(11,10)")).alias("percentage"),
-            (qty or F.lit(None).cast("decimal(25,5)")).alias("quantity"),
+            (eff if eff is not None else F.lit(None).cast("date")).alias("unadj_effective_dt"),
+            (end if end is not None else F.lit(None).cast("date")).alias("unadj_end_dt"),
+            (amt if amt is not None else F.lit(None).cast("decimal(25,19)")).alias("amount"),
+            (amt_ccy if amt_ccy is not None else F.lit(None).cast("string")).alias("amount_ccy"),
+            (amt_sgn if amt_sgn is not None else F.lit(None).cast("boolean")).alias("amount_sign"),
+            (pct if pct is not None else F.lit(None).cast("decimal(11,10)")).alias("percentage"),
+            (qty if qty is not None else F.lit(None).cast("decimal(25,5)")).alias("quantity"),
         ]
 
     price_df = _schedule(
