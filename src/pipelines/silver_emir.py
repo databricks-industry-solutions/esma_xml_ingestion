@@ -54,3 +54,47 @@ def _reporting_date(df: DataFrame) -> DataFrame:
             F.to_date(F.concat(F.lit("20"), F.col("ESMADate")), "yyyy-MM-dd"),
         ).otherwise(F.to_date(F.col("_file_modification_time")))
     )
+
+
+# --------------------------------------------------------------------------
+# Table 1 of 4: submission_file (file-level envelope)
+#
+# Regulation-agnostic. MiFIR (and any future regulation) writes to the
+# same table with regulation='MIFIR' under its own silver pipeline.
+# --------------------------------------------------------------------------
+
+
+@dp.table(
+    name=TBL_SUBMISSION_FILE,
+    comment=(
+        "Public: one row per ingested ESMA XML file. Regulation-agnostic "
+        "envelope shared across EMIR/MiFIR. Built from a dropDuplicates "
+        "over the bronze stream."
+    ),
+    cluster_by_auto=True,
+)
+def submission_file():
+    return (
+        _reporting_date(spark.readStream.table(TBL_BRONZE))
+        .dropDuplicates(["file_path"])
+        .select(
+            F.col("file_path"),
+            F.col("file_name"),
+            F.col("reporting_date"),
+            F.col("ESMADate").alias("esma_date_str"),
+            F.col("FileBatchIndex").cast("int").alias("batch_index"),
+            F.col("FileBatchSize").cast("int").alias("batch_size"),
+            F.col("FileVersion").cast("int").alias("file_version"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.BizMsgIdr").alias("biz_msg_id"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Fr.OrgId.Id.OrgId.Othr.Id").alias("sender_lei"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.To.OrgId.Id.OrgId.Othr.Id").alias("recipient_lei"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.MsgDefIdr").alias("message_def_id"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.BizSvc").alias("business_service"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.CreDt").alias("header_creation_ts"),
+            F.col("hdr_pyld_metadata.Pyld.Document.DerivsTradStatRpt.RptHdr.NbRcrds").cast("bigint").alias("number_of_records"),
+            F.col("hdr_pyld_metadata.Pyld.Document.DerivsTradStatRpt.TradData.DataSetActn").alias("data_set_action"),
+            F.col("_ingested_at").alias("ingested_at"),
+            F.current_timestamp().alias("silver_processed_at"),
+            F.lit(REGULATION).alias("regulation"),
+        )
+    )
