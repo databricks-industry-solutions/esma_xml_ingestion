@@ -393,6 +393,60 @@ def trade():
         F.col(f"{cd}.SttlmCcyScndLeg.Ccy").alias("settlement_ccy_second_leg"),
         F.col(f"{cd}.DerivBasedOnCrptAsst").alias("deriv_based_on_crypto"),
 
+        # === Transaction core (TxData) ===
+        F.col(f"{txd}.ExctnTmStmp").alias("execution_ts"),
+        F.col(f"{txd}.FctvDt").alias("effective_dt"),
+        F.col(f"{txd}.XprtnDt").alias("expiration_dt"),
+        F.col(f"{txd}.EarlyTermntnDt").alias("early_termination_dt"),
+        F.col(f"{txd}.SttlmDt").alias("settlement_dates"),
+        F.col(f"{txd}.DlvryTp").alias("delivery_type"),
+        F.col(f"{txd}.CollPrtflCd.Prtfl.Cd").alias("collateral_portfolio_cd"),
+        F.col(f"{txd}.CollPrtflCd.Prtfl.NoPrtfl").alias("has_no_collateral_portfolio"),
+        F.col(f"{txd}.MstrAgrmt.Tp.Tp").alias("master_agreement_type"),
+        F.col(f"{txd}.MstrAgrmt.Tp.Prtry").alias("master_agreement_type_proprietary"),
+        F.col(f"{txd}.MstrAgrmt.Vrsn").alias("master_agreement_version"),
+        F.col(f"{txd}.MstrAgrmt.OthrMstrAgrmtDtls").alias("master_agreement_other_details"),
+
+        # === Pricing (TxData.TxPric) ===
+        F.col(f"{txd}.TxPric.Pric.MntryVal.Amt._VALUE").alias("price_monetary_value"),
+        F.col(f"{txd}.TxPric.Pric.MntryVal.Amt._Ccy").alias("price_monetary_ccy"),
+        F.col(f"{txd}.TxPric.Pric.MntryVal.Sgn").alias("price_monetary_sign"),
+        F.col(f"{txd}.TxPric.Pric.Unit").alias("price_unit"),
+        F.col(f"{txd}.TxPric.Pric.Pctg").alias("price_percentage"),
+        F.col(f"{txd}.TxPric.Pric.Yld").alias("price_yield"),
+        F.col(f"{txd}.TxPric.Pric.PdgPric").alias("price_pending"),
+        F.col(f"{txd}.TxPric.Pric.Othr.Val").alias("price_other_value"),
+        F.col(f"{txd}.TxPric.Pric.Othr.Tp").alias("price_other_type"),
+        F.col(f"{txd}.TxPric.PricMltplr").alias("price_multiplier"),
+
+        # === Notional amounts (TxData.NtnlAmt) ===
+        F.col(f"{txd}.NtnlAmt.FrstLeg.Amt.Amt._VALUE").alias("notional_first_leg_amount"),
+        F.col(f"{txd}.NtnlAmt.FrstLeg.Amt.Amt._Ccy").alias("notional_first_leg_ccy"),
+        F.col(f"{txd}.NtnlAmt.FrstLeg.Amt.Sgn").alias("notional_first_leg_sign"),
+        F.col(f"{txd}.NtnlAmt.ScndLeg.Amt.Amt._VALUE").alias("notional_second_leg_amount"),
+        F.col(f"{txd}.NtnlAmt.ScndLeg.Amt.Amt._Ccy").alias("notional_second_leg_ccy"),
+        F.col(f"{txd}.NtnlAmt.ScndLeg.Amt.Sgn").alias("notional_second_leg_sign"),
+
+        # === Notional quantities (TxData.NtnlQty) ===
+        F.col(f"{txd}.NtnlQty.FrstLeg.TtlQty").alias("notional_first_leg_total_qty"),
+        F.col(f"{txd}.NtnlQty.ScndLeg.TtlQty").alias("notional_second_leg_total_qty"),
+
+        # === Quantity (TxData.Qty) ===
+        F.col(f"{txd}.Qty.Unit").alias("qty_unit"),
+        F.col(f"{txd}.Qty.NmnlVal._VALUE").alias("qty_nominal_value"),
+        F.col(f"{txd}.Qty.NmnlVal._Ccy").alias("qty_nominal_ccy"),
+        F.col(f"{txd}.Qty.MntryVal._VALUE").alias("qty_monetary_value"),
+        F.col(f"{txd}.Qty.MntryVal._Ccy").alias("qty_monetary_ccy"),
+
+        # === Clearing (TxData.TradClr) ===
+        F.col(f"{txd}.TradClr.ClrOblgtn").alias("clearing_obligation"),
+        F.col(f"{txd}.TradClr.ClrSts.Clrd").isNotNull().alias("is_cleared"),
+        F.col(f"{txd}.TradClr.ClrSts.Clrd.Dtls.CCP.LEI").alias("ccp_lei"),
+        F.col(f"{txd}.TradClr.ClrSts.Clrd.Dtls.CCP.Othr.Id.Id").alias("ccp_other_id"),
+        F.col(f"{txd}.TradClr.ClrSts.Clrd.Dtls.ClrDtTm").alias("cleared_ts"),
+        F.col(f"{txd}.TradClr.ClrSts.NonClrd.Rsn").alias("clearing_non_cleared_reason"),
+        F.col(f"{txd}.TradClr.IntraGrp").alias("is_intragroup"),
+
         # === Audit / lineage ===
         F.col("reporting_date"),
         F.col("file_path"),
