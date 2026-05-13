@@ -55,6 +55,10 @@ variables:
     description: "Whether to enforce Auto Loader rowValidationXSDPath on EMIR XML. 'true' (default) or 'false' to bypass."
     default: "true"
 
+  emir_enable_filename_regex:
+    description: "Whether to extract FileBatchIndex/FileBatchSize/FileVersion/ESMADate from EMIR XML filenames via the ESMA naming-convention regex. 'true' (default) or 'false' to skip (columns emit NULL)."
+    default: "true"
+
   # EMIR Schema Creation Job Variables
   emir_schema_max_concurrent_runs:
     default: 1
@@ -113,6 +117,10 @@ variables:
 
   mifir_enable_xsd_validation:
     description: "Whether to enforce Auto Loader rowValidationXSDPath on MiFIR XML. 'true' (default) or 'false' to bypass."
+    default: "true"
+
+  mifir_enable_filename_regex:
+    description: "Whether to extract FileBatchIndex/FileBatchSize/FileVersion/ESMADate from MiFIR XML filenames via the ESMA naming-convention regex. 'true' (default) or 'false' to skip (columns emit NULL)."
     default: "true"
 
   # MiFIR Schema Creation Job Variables

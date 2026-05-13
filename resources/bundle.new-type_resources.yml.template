@@ -95,3 +95,4 @@ resources:
         xml_schema_hdr_pyld_metadata_path: ${var.new-type_xml_schema_hdr_pyld_metadata_path}
         xml_xsd_schema_pyld_path: ${var.new-type_xml_xsd_schema_pyld_path}
         enable_xsd_validation: ${var.new-type_enable_xsd_validation}
+        enable_filename_regex: ${var.new-type_enable_filename_regex}

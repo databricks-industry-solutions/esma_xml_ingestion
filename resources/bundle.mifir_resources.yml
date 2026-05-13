@@ -96,3 +96,4 @@ resources:
         xml_schema_hdr_pyld_metadata_path: ${var.mifir_xml_schema_hdr_pyld_metadata_path}
         xml_xsd_schema_pyld_path: ${var.mifir_xml_xsd_schema_pyld_path}
         enable_xsd_validation: ${var.mifir_enable_xsd_validation}
+        enable_filename_regex: ${var.mifir_enable_filename_regex}

@@ -38,6 +38,18 @@ XML_XSD_SCHEMA_PYLD_PATH = spark.conf.get("xml_xsd_schema_pyld_path")
 # UDF in quarantine. Default ON preserves production behavior.
 ENABLE_XSD_VALIDATION = spark.conf.get("enable_xsd_validation", "true").lower() == "true"
 
+# Toggle filename-regex extraction. Default "true" preserves the ESMA-
+# specific naming-convention parsing for FileBatchIndex/FileBatchSize/
+# FileVersion/ESMADate. Set to "false" for non-ESMA customers whose
+# filenames don't match the `\d{6}-\d_\d{6}_` pattern; the four columns
+# stay in the output schema but emit NULL passthrough.
+#
+# TODO (customer): for full flexibility, expose filename_index_pattern
+# and filename_date_pattern (plus the substring offsets) as their own
+# config keys so customers can supply their own regex without forking
+# this file. Tracked as a future enhancement.
+ENABLE_FILENAME_REGEX = spark.conf.get("enable_filename_regex", "true").lower() == "true"
+
 # Fully qualified table names — published to {catalog}.{raw_schema}.
 TBL_RAW_XML_PAYLOAD = f"{CATALOG}.{RAW_SCHEMA}.{TABLE_PREFIX}_raw_xml_payload"
 TBL_QUARANTINE = f"{CATALOG}.{RAW_SCHEMA}.{TABLE_PREFIX}_quarantine"
@@ -337,21 +349,21 @@ def raw():
             F.substring(
                 F.regexp_extract(F.col("file_name"), _FILE_INDEX_PATTERN, 0),
                 1, 3,
-            ),
+            ) if ENABLE_FILENAME_REGEX else F.lit(None).cast("string"),
         )
         .withColumn(
             "FileBatchSize",
             F.substring(
                 F.regexp_extract(F.col("file_name"), _FILE_INDEX_PATTERN, 0),
                 4, 3,
-            ),
+            ) if ENABLE_FILENAME_REGEX else F.lit(None).cast("string"),
         )
         .withColumn(
             "FileVersion",
             F.substring(
                 F.regexp_extract(F.col("file_name"), _FILE_INDEX_PATTERN, 0),
                 8, 1,
-            ),
+            ) if ENABLE_FILENAME_REGEX else F.lit(None).cast("string"),
         )
         .withColumn(
             "ESMADate",
@@ -370,7 +382,7 @@ def raw():
                     F.regexp_extract(F.col("file_name"), _ESMA_DATE_PATTERN, 0),
                     6, 2,
                 ),
-            ),
+            ) if ENABLE_FILENAME_REGEX else F.lit(None).cast("string"),
         )
     )
 
