@@ -623,3 +623,76 @@ def transaction_party():
         .unionByName(_explode_party("SELLER", "ACCT_OWNR", "New.Sellr.AcctOwnr"), allowMissingColumns=True)
         .unionByName(_explode_party("SELLER", "DCSN_MAKR", "New.Sellr.DcsnMakr"), allowMissingColumns=True)
     )
+
+
+# --------------------------------------------------------------------------
+# Table 3 of 3: transaction (main fact, ~135 scalars + ~15 arrays)
+#
+# One row per <Tx> element. action_type discriminator: NEW (full
+# transaction with all fields) or CXL (cancellation, 3 shared fields
+# only — rest NULL). Built incrementally — each subsequent commit adds
+# one logical XSD section's columns to the .select(...) below.
+# --------------------------------------------------------------------------
+
+
+@dp.table(
+    name=TBL_TRANSACTION,
+    comment=(
+        "Public: per-MiFIR-transaction snapshot. Wide-flat with business-"
+        "readable column names. action_type ∈ {'NEW', 'CXL'} discriminator. "
+        "Choice fields collapsed to LEI + *_other_id fallback. Append-only "
+        "(event-based — not snapshot like EMIR). See spec docs/superpowers/"
+        "specs/2026-05-12-mifir-silver-design.md."
+    ),
+    cluster_by_auto=True,
+)
+def transaction():
+    src = _reporting_date(_add_filename_regex_columns(
+        spark.readStream.table(TBL_BRONZE)
+    ))
+    new_buy = "New.Buyr.AcctOwnr"
+    new_sell = "New.Sellr.AcctOwnr"
+    return src.select(
+        # === Identification (5) ===
+        F.coalesce(F.col("New.TxId"), F.col("Cxl.TxId")).alias("transaction_id"),
+        F.when(F.col("New").isNotNull(), F.lit("NEW"))
+         .when(F.col("Cxl").isNotNull(), F.lit("CXL"))
+         .otherwise(F.lit("UNKNOWN"))
+         .alias("action_type"),
+        F.coalesce(F.col("New.ExctgPty"), F.col("Cxl.ExctgPty")).alias("executing_party_lei"),
+        F.coalesce(F.col("New.SubmitgPty"), F.col("Cxl.SubmitgPty")).alias("submitting_party_lei"),
+        F.col("New.InvstmtPtyInd").alias("investment_party_indicator"),
+
+        # === Buyer flat fields — first AcctOwnr only (9 cols) ===
+        F.col(f"{new_buy}").getItem(0).getField("Id").getField("LEI").alias("buyer_lei"),
+        F.col(f"{new_buy}").getItem(0).getField("Id").getField("Othr").getField("Id").alias("buyer_other_id"),
+        F.col(f"{new_buy}").getItem(0).getField("Id").getField("Othr").getField("SchmeNm").getField("Cd").alias("buyer_other_id_scheme"),
+        F.col(f"{new_buy}").getItem(0).getField("Id").getField("Othr").getField("SchmeNm").getField("Prtry").alias("buyer_other_id_scheme_proprietary"),
+        F.col(f"{new_buy}").getItem(0).getField("Id").getField("MIC").alias("buyer_mic"),
+        F.col(f"{new_buy}").getItem(0).getField("Id").getField("Intl").alias("buyer_intl_person_id"),
+        F.col(f"{new_buy}").getItem(0).getField("CtryOfBrnch").alias("buyer_country_of_branch"),
+        F.size(F.col("New.Buyr.AcctOwnr")).alias("buyer_account_owner_count"),
+        F.size(F.col("New.Buyr.DcsnMakr")).alias("buyer_decision_maker_count"),
+
+        # === Seller flat fields — mirror of buyer (9 cols) ===
+        F.col(f"{new_sell}").getItem(0).getField("Id").getField("LEI").alias("seller_lei"),
+        F.col(f"{new_sell}").getItem(0).getField("Id").getField("Othr").getField("Id").alias("seller_other_id"),
+        F.col(f"{new_sell}").getItem(0).getField("Id").getField("Othr").getField("SchmeNm").getField("Cd").alias("seller_other_id_scheme"),
+        F.col(f"{new_sell}").getItem(0).getField("Id").getField("Othr").getField("SchmeNm").getField("Prtry").alias("seller_other_id_scheme_proprietary"),
+        F.col(f"{new_sell}").getItem(0).getField("Id").getField("MIC").alias("seller_mic"),
+        F.col(f"{new_sell}").getItem(0).getField("Id").getField("Intl").alias("seller_intl_person_id"),
+        F.col(f"{new_sell}").getItem(0).getField("CtryOfBrnch").alias("seller_country_of_branch"),
+        F.size(F.col("New.Sellr.AcctOwnr")).alias("seller_account_owner_count"),
+        F.size(F.col("New.Sellr.DcsnMakr")).alias("seller_decision_maker_count"),
+
+        # === Order transmission (3) ===
+        F.col("New.OrdrTrnsmssn.TrnsmssnInd").alias("order_transmission_indicator"),
+        F.col("New.OrdrTrnsmssn.TrnsmttgBuyr").alias("order_transmitting_buyer_lei"),
+        F.col("New.OrdrTrnsmssn.TrnsmttgSellr").alias("order_transmitting_seller_lei"),
+
+        # === Audit / lineage (4) ===
+        F.col("file_path"),
+        F.col("file_name"),
+        F.col("_ingested_at").alias("ingested_at"),
+        F.current_timestamp().alias("silver_processed_at"),
+    )
