@@ -821,9 +821,10 @@ def transaction():
         F.col("New.AddtlAttrbts.RskRdcgTx").alias("risk_reducing_transaction"),
         F.col("New.AddtlAttrbts.SctiesFincgTxInd").alias("securities_financing_tx_indicator"),
 
-        # === Audit / lineage (4) ===
+        # === Audit / lineage (5) ===
         F.col("file_path"),
         F.col("file_name"),
+        F.col("reporting_date"),
         F.col("_ingested_at").alias("ingested_at"),
         F.current_timestamp().alias("silver_processed_at"),
     )
