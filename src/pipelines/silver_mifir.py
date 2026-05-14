@@ -790,6 +790,37 @@ def transaction():
         F.transform(F.col(f"{u_oth}.Bskt.Indx"), lambda x: x["Nm"]["Term"]["Unit"]).alias("underlying_other_basket_index_term_units"),
         F.transform(F.col(f"{u_oth}.Bskt.Indx"), lambda x: x["Nm"]["Term"]["Val"]).alias("underlying_other_basket_index_term_values"),
 
+        # === Investment decision person (~9 cols) ===
+        F.col("New.InvstmtDcsnPrsn.LEI").alias("investment_decision_person_lei"),
+        F.col("New.InvstmtDcsnPrsn.Prsn.FrstNm").alias("investment_decision_person_first_name"),
+        F.col("New.InvstmtDcsnPrsn.Prsn.Nm").alias("investment_decision_person_last_name"),
+        F.col("New.InvstmtDcsnPrsn.Prsn.BirthDt").alias("investment_decision_person_birth_dt"),
+        F.col("New.InvstmtDcsnPrsn.Prsn.CtryOfBrnch").alias("investment_decision_person_country"),
+        F.col("New.InvstmtDcsnPrsn.Prsn.Othr.Id").alias("investment_decision_person_other_id"),
+        F.col("New.InvstmtDcsnPrsn.Prsn.Othr.SchmeNm.Cd").alias("investment_decision_person_other_scheme"),
+        F.col("New.InvstmtDcsnPrsn.Prsn.Othr.SchmeNm.Prtry").alias("investment_decision_person_other_scheme_proprietary"),
+        F.col("New.InvstmtDcsnPrsn.Algo").alias("investment_decision_algo_id"),
+
+        # === Executing person (~10 cols) ===
+        F.col("New.ExctgPrsn.LEI").alias("executing_person_lei"),
+        F.col("New.ExctgPrsn.Prsn.FrstNm").alias("executing_person_first_name"),
+        F.col("New.ExctgPrsn.Prsn.Nm").alias("executing_person_last_name"),
+        F.col("New.ExctgPrsn.Prsn.BirthDt").alias("executing_person_birth_dt"),
+        F.col("New.ExctgPrsn.Prsn.CtryOfBrnch").alias("executing_person_country"),
+        F.col("New.ExctgPrsn.Prsn.Othr.Id").alias("executing_person_other_id"),
+        F.col("New.ExctgPrsn.Prsn.Othr.SchmeNm.Cd").alias("executing_person_other_scheme"),
+        F.col("New.ExctgPrsn.Prsn.Othr.SchmeNm.Prtry").alias("executing_person_other_scheme_proprietary"),
+        F.col("New.ExctgPrsn.Clnt").alias("executing_person_client_indicator"),
+        F.col("New.ExctgPrsn.Algo").alias("executing_algo_id"),
+
+        # === Additional attributes (~6 cols) ===
+        F.col("New.AddtlAttrbts.ShrtSellgInd").alias("short_selling_indicator"),
+        F.transform(F.col("New.AddtlAttrbts.WvrInd"), lambda x: x["_VALUE"]).alias("waiver_indicators"),
+        F.transform(F.col("New.AddtlAttrbts.OTCPstTradInd"), lambda x: x["_VALUE"]).alias("otc_post_trade_indicators"),
+        F.col("New.AddtlAttrbts.CmmdtyDerivInd").alias("commodity_derivative_indicator"),
+        F.col("New.AddtlAttrbts.RskRdcgTx").alias("risk_reducing_transaction"),
+        F.col("New.AddtlAttrbts.SctiesFincgTxInd").alias("securities_financing_tx_indicator"),
+
         # === Audit / lineage (4) ===
         F.col("file_path"),
         F.col("file_name"),
