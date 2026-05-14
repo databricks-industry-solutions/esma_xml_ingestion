@@ -124,3 +124,63 @@ def _reporting_date(df: DataFrame) -> DataFrame:
             F.to_date(F.col("_file_modification_time")),
         ),
     )
+
+
+# --------------------------------------------------------------------------
+# Table 1 of 3: submission_file (MiFIR-specific file-level envelope)
+#
+# Built incrementally — each subsequent commit adds one logical section.
+# Final shape: ~270 columns covering UVHeader + full BizAppHeader (AppHdr
+# top-level + Sender Fr.OrgId/FIId + Recipient To.OrgId/FIId + Rltd
+# related-message mirror) per spec §4.3.
+# --------------------------------------------------------------------------
+
+
+@dp.table(
+    name=TBL_SUBMISSION_FILE,
+    comment=(
+        "Public: one row per ingested MiFIR XML file. MiFIR-specific shape "
+        "(distinct from EMIR's submission_file) including UVHeader vendor "
+        "wrapper, full BizAppHeader, and the 135-leaf Rltd related-message "
+        "block. Built from a dropDuplicates over the bronze stream."
+    ),
+    cluster_by_auto=True,
+)
+def submission_file():
+    return (
+        _reporting_date(_add_filename_regex_columns(
+            spark.readStream.table(TBL_BRONZE)
+        ))
+        .dropDuplicates(["file_path"])
+        .select(
+            # File metadata (~10 cols)
+            F.col("file_path"),
+            F.col("file_name"),
+            F.col("_ingested_at").alias("ingested_at"),
+            F.current_timestamp().alias("silver_processed_at"),
+            F.col("client_id_from_filename"),
+            F.col("filename_timestamp"),
+            F.col("filename_timestamp_parsed"),
+            F.col("filename_sequence"),
+            F.col("reporting_date"),
+            F.lit(REGULATION).alias("regulation"),
+
+            # UVHeader (UnaVista vendor wrapper, 4 cols)
+            F.col("hdr_pyld_metadata.UVHeader.UVHeader.InternalClientId").alias("unavista_internal_client_id"),
+            F.col("hdr_pyld_metadata.UVHeader.UVHeader.DataCategory").alias("unavista_data_category"),
+            F.col("hdr_pyld_metadata.UVHeader.UVHeader.SubmittingEntityID").alias("unavista_submitting_entity_id"),
+            F.col("hdr_pyld_metadata.UVHeader.UVHeader.FileID").alias("unavista_file_id"),
+
+            # AppHdr top-level (10 cols)
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.CharSet").alias("header_char_set"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.BizMsgIdr").alias("biz_msg_id"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.MsgDefIdr").alias("message_def_id"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.BizSvc").alias("business_service"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.CreDt").alias("header_creation_ts"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.CpyDplct").alias("copy_duplicate_indicator"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.PssblDplct").alias("possible_duplicate"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Prty").alias("priority"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Sgntr").cast("string").alias("signature_xml"),
+            F.lit(None).cast("bigint").alias("number_of_records"),  # filled by a downstream agg in v2; for now placeholder
+        )
+    )
