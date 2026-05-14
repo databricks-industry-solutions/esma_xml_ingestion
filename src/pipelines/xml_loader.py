@@ -305,7 +305,7 @@ def raw_xml_payload():
     )
     if ENABLE_XSD_VALIDATION:
         loader = loader.option("rowValidationXSDPath", XML_XSD_SCHEMA_PYLD_PATH)
-    return (
+    df = (
         loader
         .schema(XML_PYLD_SCHEMA)
         .load(LANDING_PATH)
@@ -317,6 +317,14 @@ def raw_xml_payload():
         )
         .withColumn("_ingested_at", F.current_timestamp())
     )
+    # Defensive: with a user-supplied schema, some Spark/DBR builds don't
+    # materialize the columnNameOfCorruptRecord column unless it's listed
+    # in the schema. Add a NULL passthrough so downstream tables (which
+    # filter on corrupted_record IS NOT NULL / IS NULL) keep working. On
+    # builds where Auto Loader does emit it, this branch is a no-op.
+    if "corrupted_record" not in df.columns:
+        df = df.withColumn("corrupted_record", F.lit(None).cast("string"))
+    return df
 
 
 # --------------------------------------------------------------------------
