@@ -554,3 +554,72 @@ def submission_file():
             F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Rltd.To.FIId.BrnchId.PstlAdr.AdrLine").alias("related_recipient_fi_branch_address_lines"),
         )
     )
+
+
+# --------------------------------------------------------------------------
+# Table 2 of 3: transaction_party (unified party explode)
+#
+# Built via four posexplode_outer operations (one per array), unioned
+# with side ∈ {BUYER, SELLER} and party_role ∈ {ACCT_OWNR, DCSN_MAKR}
+# discriminators. Filtered to drop NULL rows from posexplode_outer.
+# --------------------------------------------------------------------------
+
+
+@dp.table(
+    name=TBL_TRANSACTION_PARTY,
+    comment=(
+        "Public: one row per repeating party identification per "
+        "transaction. Unified explode of Buyr.AcctOwnr[], Buyr.DcsnMakr[], "
+        "Sellr.AcctOwnr[], Sellr.DcsnMakr[] with side + party_role "
+        "discriminators. Common case (single AcctOwnr per side) "
+        "duplicates transaction.{buyer,seller}_* — multi-owner cases live "
+        "here only."
+    ),
+    cluster_by_auto=True,
+)
+def transaction_party():
+    bronze = spark.readStream.table(TBL_BRONZE)
+
+    def _explode_party(side: str, party_role: str, array_path: str):
+        """Posexplode-outer one party array, project unified row schema."""
+        return (
+            bronze
+            .select(
+                F.col("New.TxId").alias("transaction_id"),
+                F.lit(side).alias("side"),
+                F.lit(party_role).alias("party_role"),
+                F.col("_ingested_at").alias("ingested_at"),
+                F.posexplode_outer(F.col(array_path)).alias("sequence_no", "_party"),
+            )
+            .filter(F.col("transaction_id").isNotNull())
+            .filter(F.col("_party").isNotNull())
+            .select(
+                "transaction_id",
+                "side",
+                "party_role",
+                "sequence_no",
+                F.col("_party.Id.LEI").alias("party_lei"),
+                F.col("_party.Id.Othr.Id").alias("party_other_id"),
+                F.col("_party.Id.Othr.SchmeNm.Cd").alias("party_other_id_scheme"),
+                F.col("_party.Id.Othr.SchmeNm.Prtry").alias("party_other_id_scheme_proprietary"),
+                F.col("_party.Id.MIC").alias("party_mic"),
+                F.col("_party.Id.Intl").alias("party_intl_person_id"),
+                F.col("_party.CtryOfBrnch").alias("party_country_of_branch"),
+                F.col("_party.Id.Prsn.FrstNm").alias("person_first_name"),
+                F.col("_party.Id.Prsn.Nm").alias("person_last_name"),
+                F.col("_party.Id.Prsn.BirthDt").alias("person_birth_dt"),
+                F.col("_party.Id.Prsn.CtryOfBrnch").alias("person_country"),
+                F.col("_party.Id.Prsn.Othr.Id").alias("person_other_id"),
+                F.col("_party.Id.Prsn.Othr.SchmeNm.Cd").alias("person_other_scheme"),
+                F.col("_party.Id.Prsn.Othr.SchmeNm.Prtry").alias("person_other_scheme_proprietary"),
+                F.col("ingested_at"),
+                F.current_timestamp().alias("silver_processed_at"),
+            )
+        )
+
+    return (
+        _explode_party("BUYER",  "ACCT_OWNR", "New.Buyr.AcctOwnr")
+        .unionByName(_explode_party("BUYER",  "DCSN_MAKR", "New.Buyr.DcsnMakr"), allowMissingColumns=True)
+        .unionByName(_explode_party("SELLER", "ACCT_OWNR", "New.Sellr.AcctOwnr"), allowMissingColumns=True)
+        .unionByName(_explode_party("SELLER", "DCSN_MAKR", "New.Sellr.DcsnMakr"), allowMissingColumns=True)
+    )
