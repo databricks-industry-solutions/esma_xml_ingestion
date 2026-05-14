@@ -18,6 +18,8 @@ targets:
           development: true
         mifir_xml_loader_pipeline:
           development: true
+        mifir_silver_pipeline:
+          development: true
 
   prod:
     mode: production
@@ -28,4 +30,6 @@ targets:
         emir_xml_loader_pipeline:
           development: false
         mifir_xml_loader_pipeline:
+          development: false
+        mifir_silver_pipeline:
           development: false
