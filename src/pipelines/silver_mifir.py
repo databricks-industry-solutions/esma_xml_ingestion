@@ -771,8 +771,8 @@ def transaction():
 
         # === Instrument — general + derivative attributes (~18 cols) ===
         F.coalesce(
-            F.col("New.FinInstrm.Id"),
-            F.col("New.FinInstrm.Othr.FinInstrmGnlAttrbts.Id"),
+            F.col("New.FinInstrm.Id._VALUE"),
+            F.col("New.FinInstrm.Othr.FinInstrmGnlAttrbts.Id._VALUE"),
         ).alias("instrument_isin"),
         F.col("New.FinInstrm.Othr.FinInstrmGnlAttrbts.FullNm").alias("instrument_full_name"),
         F.col("New.FinInstrm.Othr.FinInstrmGnlAttrbts.ClssfctnTp").alias("instrument_classification"),
