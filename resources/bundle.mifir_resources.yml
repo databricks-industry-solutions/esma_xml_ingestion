@@ -97,3 +97,25 @@ resources:
         xml_xsd_schema_pyld_path: ${var.mifir_xml_xsd_schema_pyld_path}
         enable_xsd_validation: ${var.mifir_enable_xsd_validation}
         enable_filename_regex: ${var.mifir_enable_filename_regex}
+
+    mifir_silver_pipeline:
+      name: "MiFIR Silver (domain-driven)"
+      catalog: ${var.mifir_catalog}
+      schema: ${var.mifir_raw_schema}
+      serverless: true
+      channel: PREVIEW
+      development: false
+      photon: true
+      continuous: false
+
+      libraries:
+        - file:
+            path: ../src/pipelines/silver_mifir.py
+
+      configuration:
+        catalog: ${var.mifir_catalog}
+        raw_schema: ${var.mifir_raw_schema}
+        silver_schema: ${var.mifir_raw_schema}
+        bronze_table: ${var.mifir_table_prefix}_raw
+        regulation: "MIFIR"
+        enable_filename_regex: "true"
