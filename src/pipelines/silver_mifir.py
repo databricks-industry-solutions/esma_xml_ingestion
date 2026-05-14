@@ -652,6 +652,10 @@ def transaction():
     ))
     new_buy = "New.Buyr.AcctOwnr"
     new_sell = "New.Sellr.AcctOwnr"
+    # Underlying-instrument path prefixes for the 6 sub-groups
+    u_si = "New.FinInstrm.Othr.DerivInstrmAttrbts.UndrlygInstrm.Swp.SwpIn"
+    u_so = "New.FinInstrm.Othr.DerivInstrmAttrbts.UndrlygInstrm.Swp.SwpOut"
+    u_oth = "New.FinInstrm.Othr.DerivInstrmAttrbts.UndrlygInstrm.Othr"
     return src.select(
         # === Identification (5) ===
         F.coalesce(F.col("New.TxId"), F.col("Cxl.TxId")).alias("transaction_id"),
@@ -715,6 +719,76 @@ def transaction():
         F.col("New.Tx.CtryOfBrnch").alias("trade_country_of_branch"),
         F.col("New.Tx.TradPlcMtchgId").alias("trade_place_matching_id"),
         F.col("New.Tx.CmplxTradCmpntId").alias("complex_trade_component_id"),
+
+        # === Instrument — general + derivative attributes (~18 cols) ===
+        F.coalesce(
+            F.col("New.FinInstrm.Id"),
+            F.col("New.FinInstrm.Othr.FinInstrmGnlAttrbts.Id"),
+        ).alias("instrument_isin"),
+        F.col("New.FinInstrm.Othr.FinInstrmGnlAttrbts.FullNm").alias("instrument_full_name"),
+        F.col("New.FinInstrm.Othr.FinInstrmGnlAttrbts.ClssfctnTp").alias("instrument_classification"),
+        F.col("New.FinInstrm.Othr.FinInstrmGnlAttrbts.NtnlCcy").alias("instrument_notional_currency"),
+        F.col("New.FinInstrm.Othr.FinInstrmGnlAttrbts.CmmdtyDerivInd").alias("instrument_commodity_derivative"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.AsstClssSpcfcAttrbts.Intrst.OthrNtnlCcy").alias("interest_other_notional_currency"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.AsstClssSpcfcAttrbts.FX.OthrNtnlCcy").alias("fx_other_notional_currency"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.PricMltplr").alias("instrument_price_multiplier"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.DlvryTp").alias("instrument_delivery_type"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.MtrtyDt").alias("instrument_maturity_dt"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.XpryDt").alias("instrument_expiry_dt"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.StrkPric.MntryVal._VALUE").alias("instrument_strike_price"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.StrkPric.MntryVal._Ccy").alias("instrument_strike_price_ccy"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.StrkPric.Pctg").alias("instrument_strike_price_percent"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.StrkPric.Yld").alias("instrument_strike_price_yield"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.OptnTp").alias("instrument_option_type"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.OptnExrcStyle").alias("instrument_option_exercise_style"),
+        F.when(F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.UndrlygInstrm.Swp").isNotNull(), F.lit("SWAP"))
+         .when(F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.UndrlygInstrm.Othr").isNotNull(), F.lit("OTHER"))
+         .otherwise(F.lit(None).cast("string"))
+         .alias("underlying_type"),
+
+        # === Underlying instrument — 6 sub-prefix groups (~48 cols) ===
+        # swap_in_single
+        F.col(f"{u_si}.Sngl.ISIN._VALUE").alias("underlying_swap_in_single_isin"),
+        F.col(f"{u_si}.Sngl.Indx.ISIN._VALUE").alias("underlying_swap_in_single_index_isin"),
+        F.col(f"{u_si}.Sngl.Indx.Nm.RefRate.Indx._VALUE").alias("underlying_swap_in_single_index_ref_rate_code"),
+        F.col(f"{u_si}.Sngl.Indx.Nm.RefRate.Nm").alias("underlying_swap_in_single_index_ref_rate_name"),
+        F.col(f"{u_si}.Sngl.Indx.Nm.Term.Unit").alias("underlying_swap_in_single_index_term_unit"),
+        F.col(f"{u_si}.Sngl.Indx.Nm.Term.Val").alias("underlying_swap_in_single_index_term_value"),
+        # swap_in_basket
+        F.transform(F.col(f"{u_si}.Bskt.ISIN"), lambda x: x["_VALUE"]).alias("underlying_swap_in_basket_isins"),
+        F.transform(F.col(f"{u_si}.Bskt.Indx"), lambda x: x["ISIN"]["_VALUE"]).alias("underlying_swap_in_basket_index_isins"),
+        F.transform(F.col(f"{u_si}.Bskt.Indx"), lambda x: x["Nm"]["RefRate"]["Indx"]["_VALUE"]).alias("underlying_swap_in_basket_index_ref_rate_codes"),
+        F.transform(F.col(f"{u_si}.Bskt.Indx"), lambda x: x["Nm"]["RefRate"]["Nm"]).alias("underlying_swap_in_basket_index_ref_rate_names"),
+        F.transform(F.col(f"{u_si}.Bskt.Indx"), lambda x: x["Nm"]["Term"]["Unit"]).alias("underlying_swap_in_basket_index_term_units"),
+        F.transform(F.col(f"{u_si}.Bskt.Indx"), lambda x: x["Nm"]["Term"]["Val"]).alias("underlying_swap_in_basket_index_term_values"),
+        # swap_out_single — same shape as swap_in_single with u_so
+        F.col(f"{u_so}.Sngl.ISIN._VALUE").alias("underlying_swap_out_single_isin"),
+        F.col(f"{u_so}.Sngl.Indx.ISIN._VALUE").alias("underlying_swap_out_single_index_isin"),
+        F.col(f"{u_so}.Sngl.Indx.Nm.RefRate.Indx._VALUE").alias("underlying_swap_out_single_index_ref_rate_code"),
+        F.col(f"{u_so}.Sngl.Indx.Nm.RefRate.Nm").alias("underlying_swap_out_single_index_ref_rate_name"),
+        F.col(f"{u_so}.Sngl.Indx.Nm.Term.Unit").alias("underlying_swap_out_single_index_term_unit"),
+        F.col(f"{u_so}.Sngl.Indx.Nm.Term.Val").alias("underlying_swap_out_single_index_term_value"),
+        # swap_out_basket — same shape as swap_in_basket
+        F.transform(F.col(f"{u_so}.Bskt.ISIN"), lambda x: x["_VALUE"]).alias("underlying_swap_out_basket_isins"),
+        F.transform(F.col(f"{u_so}.Bskt.Indx"), lambda x: x["ISIN"]["_VALUE"]).alias("underlying_swap_out_basket_index_isins"),
+        F.transform(F.col(f"{u_so}.Bskt.Indx"), lambda x: x["Nm"]["RefRate"]["Indx"]["_VALUE"]).alias("underlying_swap_out_basket_index_ref_rate_codes"),
+        F.transform(F.col(f"{u_so}.Bskt.Indx"), lambda x: x["Nm"]["RefRate"]["Nm"]).alias("underlying_swap_out_basket_index_ref_rate_names"),
+        F.transform(F.col(f"{u_so}.Bskt.Indx"), lambda x: x["Nm"]["Term"]["Unit"]).alias("underlying_swap_out_basket_index_term_units"),
+        F.transform(F.col(f"{u_so}.Bskt.Indx"), lambda x: x["Nm"]["Term"]["Val"]).alias("underlying_swap_out_basket_index_term_values"),
+        # underlying_other_single — same shape with u_oth
+        F.col(f"{u_oth}.Sngl.ISIN._VALUE").alias("underlying_other_single_isin"),
+        F.col(f"{u_oth}.Sngl.Indx.ISIN._VALUE").alias("underlying_other_single_index_isin"),
+        F.col(f"{u_oth}.Sngl.Indx.Nm.RefRate.Indx._VALUE").alias("underlying_other_single_index_ref_rate_code"),
+        F.col(f"{u_oth}.Sngl.Indx.Nm.RefRate.Nm").alias("underlying_other_single_index_ref_rate_name"),
+        F.col(f"{u_oth}.Sngl.Indx.Nm.Term.Unit").alias("underlying_other_single_index_term_unit"),
+        F.col(f"{u_oth}.Sngl.Indx.Nm.Term.Val").alias("underlying_other_single_index_term_value"),
+        # underlying_other_basket
+        F.transform(F.col(f"{u_oth}.Bskt.ISIN"), lambda x: x["_VALUE"]).alias("underlying_other_basket_isins"),
+        F.transform(F.col(f"{u_oth}.Bskt.Indx"), lambda x: x["ISIN"]["_VALUE"]).alias("underlying_other_basket_index_isins"),
+        F.transform(F.col(f"{u_oth}.Bskt.Indx"), lambda x: x["Nm"]["RefRate"]["Indx"]["_VALUE"]).alias("underlying_other_basket_index_ref_rate_codes"),
+        F.transform(F.col(f"{u_oth}.Bskt.Indx"), lambda x: x["Nm"]["RefRate"]["Nm"]).alias("underlying_other_basket_index_ref_rate_names"),
+        F.transform(F.col(f"{u_oth}.Bskt.Indx"), lambda x: x["Nm"]["Term"]["Unit"]).alias("underlying_other_basket_index_term_units"),
+        F.transform(F.col(f"{u_oth}.Bskt.Indx"), lambda x: x["Nm"]["Term"]["Val"]).alias("underlying_other_basket_index_term_values"),
 
         # === Audit / lineage (4) ===
         F.col("file_path"),
