@@ -20,6 +20,8 @@ targets:
           development: true
         emir_silver_pipeline:
           development: true
+        mifir_silver_pipeline:
+          development: true
 
   prod:
     mode: production
@@ -32,4 +34,6 @@ targets:
         mifir_xml_loader_pipeline:
           development: false
         emir_silver_pipeline:
+          development: false
+        mifir_silver_pipeline:
           development: false
