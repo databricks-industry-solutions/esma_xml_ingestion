@@ -1,22 +1,17 @@
 # EMIR (European Market Infrastructure Regulation) Job Definitions
 
 resources:
+
+  # === Classic Notebook Jobs ===
   jobs:
     EMIR_XML_Processing:
       name: "EMIR XML Processing"
       max_concurrent_runs: ${var.emir_max_concurrent_runs}
-      
+
       tasks:
-        - task_key: emir_xml_load
-          notebook_task:
-            notebook_path: ../src/1_xml_file_loader_body.py
-            source: WORKSPACE
-            
         - task_key: emir_xml_flatten
-          depends_on:
-            - task_key: emir_xml_load
           notebook_task:
-            notebook_path: ../src/2_flatten_explode_table.py
+            notebook_path: ../src/notebooks/2_flatten_explode_table.py
             source: WORKSPACE
             
       queue:
@@ -53,7 +48,7 @@ resources:
       tasks:
         - task_key: emir_schema_generation
           notebook_task:
-            notebook_path: ../src/0_1_xml_schema_xsd.py
+            notebook_path: ../src/notebooks/0_1_xml_schema_xsd.py
             source: WORKSPACE
             
       queue:
@@ -70,5 +65,35 @@ resources:
           default: "${var.emir_row_tag}"
         - name: schema_mappings_json
           default: "${var.emir_schema_mappings_json}"
-         
-        
+
+  # === Spark Declarative Pipelines ===
+  pipelines:
+    emir_xml_loader_pipeline:
+      name: "EMIR XML Loader (SDP)"
+      catalog: ${var.emir_catalog}
+      schema: ${var.emir_raw_schema}
+      serverless: true
+      channel: PREVIEW
+      development: false
+      photon: true
+      continuous: false
+
+      libraries:
+        - file:
+            path: ../src/pipelines/xml_loader.py
+
+      environment:
+        dependencies:
+          - lxml==5.3.0
+
+      configuration:
+        catalog: ${var.emir_catalog}
+        raw_schema: ${var.emir_raw_schema}
+        table_prefix: ${var.emir_table_prefix}
+        landing_path: ${var.emir_landing_path}
+        row_tag: ${var.emir_row_tag}
+        xml_schema_pyld_path: ${var.emir_xml_schema_pyld_path}
+        xml_schema_hdr_pyld_metadata_path: ${var.emir_xml_schema_hdr_pyld_metadata_path}
+        xml_xsd_schema_pyld_path: ${var.emir_xml_xsd_schema_pyld_path}
+        enable_xsd_validation: ${var.emir_enable_xsd_validation}
+        enable_filename_regex: ${var.emir_enable_filename_regex}

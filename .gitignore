@@ -43,3 +43,7 @@ dmypy.json
 
 # Personal
 scratch/
+
+# Local bundle config overrides (per-developer)
+resources/config/local/*
+!resources/config/local/*.template

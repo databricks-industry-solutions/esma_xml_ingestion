@@ -1,22 +1,17 @@
 # MiFIR (Markets in Financial Instruments Regulation) Job Definitions
 
 resources:
+
+  # === Classic Notebook Jobs ===
   jobs:
     MiFIR_XML_Processing:
       name: "MiFIR XML Processing"
       max_concurrent_runs: ${var.mifir_max_concurrent_runs}
-      
+
       tasks:
-        - task_key: mifir_xml_load
-          notebook_task:
-            notebook_path: ../src/1_xml_file_loader_body.py
-            source: WORKSPACE
-            
         - task_key: mifir_xml_flatten
-          depends_on:
-            - task_key: mifir_xml_load
           notebook_task:
-            notebook_path: ../src/2_flatten_explode_table.py
+            notebook_path: ../src/notebooks/2_flatten_explode_table.py
             source: WORKSPACE
             
       queue:
@@ -53,7 +48,7 @@ resources:
       tasks:
         - task_key: mifir_schema_generation
           notebook_task:
-            notebook_path: ../src/0_1_xml_schema_xsd.py
+            notebook_path: ../src/notebooks/0_1_xml_schema_xsd.py
             source: WORKSPACE
             
       queue:
@@ -70,5 +65,35 @@ resources:
           default: "${var.mifir_row_tag}"
         - name: schema_mappings_json
           default: "${var.mifir_schema_mappings_json}"
-         
-        
+
+  # === Spark Declarative Pipelines ===
+  pipelines:
+    mifir_xml_loader_pipeline:
+      name: "MiFIR XML Loader (SDP)"
+      catalog: ${var.mifir_catalog}
+      schema: ${var.mifir_raw_schema}
+      serverless: true
+      channel: PREVIEW
+      development: false
+      photon: true
+      continuous: false
+
+      libraries:
+        - file:
+            path: ../src/pipelines/xml_loader.py
+
+      environment:
+        dependencies:
+          - lxml==5.3.0
+
+      configuration:
+        catalog: ${var.mifir_catalog}
+        raw_schema: ${var.mifir_raw_schema}
+        table_prefix: ${var.mifir_table_prefix}
+        landing_path: ${var.mifir_landing_path}
+        row_tag: ${var.mifir_row_tag}
+        xml_schema_pyld_path: ${var.mifir_xml_schema_pyld_path}
+        xml_schema_hdr_pyld_metadata_path: ${var.mifir_xml_schema_hdr_pyld_metadata_path}
+        xml_xsd_schema_pyld_path: ${var.mifir_xml_xsd_schema_pyld_path}
+        enable_xsd_validation: ${var.mifir_enable_xsd_validation}
+        enable_filename_regex: ${var.mifir_enable_filename_regex}

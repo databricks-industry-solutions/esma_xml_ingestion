@@ -1,70 +1,98 @@
-# TEMPLATE for New Regulatory Configuration
-# Copy this file and rename to: [regulation-name]-config.yml
-# Add corresponding variables to databricks.yml for the new regulation
-
-# Example: For SFTR regulation, you would:
-# 1. Copy this file to: sftr-config.yml
-# 2. Replace TEMPLATE with SFTR throughout
-# 3. Add to databricks.yml variables section:
-#    sftr_max_concurrent_runs:
-#      default: 6
-#    sftr_table_prefix:
-#      default: "sftr_"
-#    sftr_row_tag:
-#      default: "FinancingTransaction"
+# Template for a NEW REGULATION's job + pipeline definitions
+#
+# To scaffold a new regulation:
+#   1. Copy this file to `bundle.<regulation>_resources.yml`
+#   2. Replace every `new-type` with your regulation's lowercase prefix
+#      (e.g., `csdr`, `sftr`)
+#   3. Replace every `New-Type` and `NEW_TYPE` with the appropriate case
+#   4. Add matching `${var.<prefix>_*}` defaults to bundle.variables.yml
+#      (including `<prefix>_enable_xsd_validation` for the Auto Loader
+#      XSD-validation toggle consumed by src/pipelines/xml_loader.py).
+#   5. (Optional) Add target overrides for development=true|false in
+#      databricks.yml under targets.{dev,prod}.resources.pipelines.
 
 resources:
+
+  # === Classic Notebook Jobs ===
   jobs:
-    TEMPLATE_XML_Processing:  # Replace: [REGULATION_NAME]_XML_Processing
-      name: "TEMPLATE XML Processing"  # Replace: TEMPLATE with regulation name
-      max_concurrent_runs: "{{vars.template_max_concurrent_runs}}"  # Add this variable to databricks.yml
-      
+    NEW_TYPE_XML_Processing:
+      name: "NEW_TYPE XML Processing"
+      max_concurrent_runs: ${var.new-type_max_concurrent_runs}
+
       tasks:
-        - task_key: template_xml_load  # Replace: template with regulation name
+        - task_key: new-type_xml_flatten
           notebook_task:
-            notebook_path: ../src/1_xml_file_loader_body.py
+            notebook_path: ../src/notebooks/2_flatten_explode_table.py
             source: WORKSPACE
-            
-        - task_key: template_xml_flatten  # Replace: template with regulation name
-          depends_on:
-            - task_key: template_xml_load  # Match above task_key
-          notebook_task:
-            notebook_path: ../src/2_flatten_explode_table.py
-            source: WORKSPACE
-            
+
       queue:
         enabled: true
-        
+
       parameters:
         - name: table_prefix
-          default: "{{vars.template_table_prefix}}"  # Add this variable to databricks.yml
+          default: "${var.new-type_table_prefix}"
         - name: catalog
-          default: "{{vars.catalog}}"
+          default: "${var.new-type_catalog}"
         - name: raw_schema
-          default: "{{vars.raw_schema}}"
+          default: "${var.new-type_raw_schema}"
         - name: bronze_schema
-          default: "{{vars.bronze_schema}}"
+          default: "${var.new-type_bronze_schema}"
         - name: checkpoint_path
-          default: "{{vars.volume_path}}/template/checkpoints/"  # Replace: template
-        - name: landing_path
-          default: "{{vars.volume_path}}/template/landing/"      # Replace: template
-        - name: processed_path
-          default: "{{vars.volume_path}}/template/processed/"    # Replace: template
-        - name: row_tag
-          default: "{{vars.template_row_tag}}"  # Add this variable to databricks.yml
-        - name: xml_schema_hdr_pyld_metadata_path
-          default: "{{vars.volume_path}}/schemas/template/hdr_pyld_metadata_schema.json"  # Replace: template
-        - name: xml_schema_pyld_path
-          default: "{{vars.volume_path}}/schemas/template/pyld_schema.json"  # Replace: template
-        - name: xml_xsd_schema_pyld_path
-          default: "{{vars.volume_path}}/schemas/template/rowtag_schema.xsd"  # Replace: template
+          default: "${var.new-type_checkpoint_path}"
 
-# CHECKLIST for new regulation:
-# □ Copy this file to [regulation]-config.yml
-# □ Replace all instances of "TEMPLATE" and "template"
-# □ Add corresponding variables to databricks.yml:
-#   - [regulation]_max_concurrent_runs
-#   - [regulation]_table_prefix  
-#   - [regulation]_row_tag
-# □ Test deployment: databricks bundle deploy -t dev
-# □ Test execution: databricks bundle run [REGULATION_NAME]_XML_Processing -t dev 
+    NEW_TYPE_Schema_Creation:
+      name: "NEW_TYPE Schema Creation"
+      max_concurrent_runs: ${var.new-type_schema_max_concurrent_runs}
+
+      tasks:
+        - task_key: new-type_schema_generation
+          notebook_task:
+            notebook_path: ../src/notebooks/0_1_xml_schema_xsd.py
+            source: WORKSPACE
+
+      queue:
+        enabled: true
+
+      parameters:
+        - name: schemas_path
+          default: "${var.new-type_schemas_path}"
+        - name: master_xsd_path
+          default: "${var.new-type_master_xsd_path}"
+        - name: payload_xsd_path
+          default: "${var.new-type_payload_xsd_path}"
+        - name: row_tag
+          default: "${var.new-type_row_tag}"
+        - name: schema_mappings_json
+          default: "${var.new-type_schema_mappings_json}"
+
+  # === Spark Declarative Pipelines ===
+  pipelines:
+    new-type_xml_loader_pipeline:
+      name: "NEW_TYPE XML Loader (SDP)"
+      catalog: ${var.new-type_catalog}
+      schema: ${var.new-type_raw_schema}
+      serverless: true
+      channel: PREVIEW
+      development: false
+      photon: true
+      continuous: false
+
+      libraries:
+        - file:
+            path: ../src/pipelines/xml_loader.py
+
+      environment:
+        dependencies:
+          - lxml==5.3.0
+
+      configuration:
+        catalog: ${var.new-type_catalog}
+        raw_schema: ${var.new-type_raw_schema}
+        table_prefix: ${var.new-type_table_prefix}
+        landing_path: ${var.new-type_landing_path}
+        row_tag: ${var.new-type_row_tag}
+        xml_schema_pyld_path: ${var.new-type_xml_schema_pyld_path}
+        xml_schema_hdr_pyld_metadata_path: ${var.new-type_xml_schema_hdr_pyld_metadata_path}
+        xml_xsd_schema_pyld_path: ${var.new-type_xml_xsd_schema_pyld_path}
+        enable_xsd_validation: ${var.new-type_enable_xsd_validation}
+        enable_filename_regex: ${var.new-type_enable_filename_regex}

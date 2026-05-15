@@ -1,0 +1,24 @@
+# Local development variable overrides (per-developer).
+#
+# Copy this file to dev-variables.yml in the same directory and edit
+# the values for your workspace. The dev-variables.yml file is
+# git-ignored; this .template file is committed as documentation.
+#
+# Why a `targets:` block?
+# Databricks bundle variable resolution: target-level `variables:` always
+# wins over an include file's top-level `variables: <name>: default:`.
+# To actually override the `dev` target, the overrides must live INSIDE
+# `targets.dev.variables`, not under top-level `variables:`.
+#
+# Example below targets the E2 demo field-eng workspace's
+# central_bank_ireland volume for SDP XML loader smoke testing.
+
+targets:
+  dev:
+    variables:
+      catalog: "users"
+      emir_raw_schema: "matthew_moorcroft"
+      emir_landing_path: "/Volumes/users/matthew_moorcroft/central_bank_ireland/landing/"
+      emir_xml_schema_pyld_path: "/Volumes/users/matthew_moorcroft/central_bank_ireland/schemas/pyld_schema.json"
+      emir_xml_schema_hdr_pyld_metadata_path: "/Volumes/users/matthew_moorcroft/central_bank_ireland/schemas/hdr_pyld_metadata_schema.json"
+      emir_xml_xsd_schema_pyld_path: "/Volumes/users/matthew_moorcroft/central_bank_ireland/schemas/row_tag_schema.xsd"

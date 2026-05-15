@@ -43,32 +43,36 @@ Benefits of using DABs:
 
 ```
 esma_xml_ingestion/
-├── databricks.yml                    # Main bundle configuration
-├── resources/                        # Bundle resource definitions
-│   ├── emir-config.yml               # EMIR job definition
-│   ├── mifir-config.yml              # MiFIR job definition
+├── databricks.yml                          # Main bundle config
+├── resources/
+│   ├── bundle.variables.yml                # Shared variables
+│   ├── bundle.emir_resources.yml           # EMIR jobs + SDP pipeline
+│   ├── bundle.mifir_resources.yml          # MiFIR jobs + SDP pipeline
+│   ├── bundle.new-type_resources.yml.template
 │   └── config/
-│       ├── local/                    # Development configuration (git-ignored)
-│       │   └── dev-variables.yml     # Local development variables
-│       └── production/               # Production configuration (committed)
-│           └── prod-variables.yml    # Production default variables
+│       └── local/                          # git-ignored per-developer overrides
+│           └── dev-variables.yml.template
 ├── src/
-│   ├── notebooks/                    # Processing notebooks
-│   │   ├── 1_xml_file_loader_body.ipynb    # XML ingestion
-│   │   └── 2_flatten_explode_table.ipynb   # Data flattening and transformation
+│   ├── notebooks/                          # Classic notebooks (jobs)
+│   │   ├── 0_1_xml_schema_xsd.py           # XSD → JSON Spark schemas
+│   │   ├── 1_xml_file_loader_body.py       # (legacy reference — replaced by SDP)
+│   │   └── 2_flatten_explode_table.py      # Flatten + explode → bronze
+│   ├── pipelines/                          # Spark Declarative Pipelines
+│   │   └── xml_loader.py                   # Parameterized SDP for EMIR + MiFIR
 │   └── util/
-│       └── xsd_processor.py          # XSD schema processing utilities
-├── fixtures/                         # Sample data and test files
-├── scratch/                          # Development workspace
-└── .gitignore                        # Git ignore configuration
+│       └── xsd_processor.py                # XSD parsing helpers (Python)
+├── fixtures/                               # Sample data and test files
+├── scratch/                                # Development workspace
+└── docs/superpowers/                       # Specs and implementation plans
 ```
 
 ### Key Components
 
 - **`databricks.yml`**: Main bundle configuration that defines deployment targets and includes resource files
-- **`resources/`**: Contains job definitions for different regulations (EMIR, MiFIR) with serverless compute
-- **`src/notebooks/`**: Core processing logic for XML ingestion and flattening
-- **`config/`**: Separated configuration for development (local) and production environments
+- **`resources/`**: Per-regulation jobs and SDP pipelines (EMIR, MiFIR), shared variables, and per-developer local overrides
+- **`src/pipelines/`**: Parameterized Spark Declarative Pipeline (SDP) source for XML ingestion → `{prefix}_raw` + `{prefix}_quarantine`
+- **`src/notebooks/`**: Classic notebooks for XSD-to-schema preparation and the flatten/explode bronze step
+- **`src/util/`**: Python helpers for XSD processing
 
 ## Prerequisites
 
@@ -138,7 +142,7 @@ git clone <repository-url>
 cd esma_xml_ingestion
 
 # Copy and customize development variables
-cp resources/config/production/prod-variables.yml resources/config/local/dev-variables.yml
+cp resources/config/local/dev-variables.yml.template resources/config/local/dev-variables.yml
 # Edit dev-variables.yml with your workspace-specific settings
 ```
 
