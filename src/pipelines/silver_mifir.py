@@ -578,7 +578,9 @@ def submission_file():
     cluster_by_auto=True,
 )
 def transaction_party():
-    bronze = spark.readStream.table(TBL_BRONZE)
+    bronze = _reporting_date(_add_filename_regex_columns(
+        spark.readStream.table(TBL_BRONZE)
+    ))
 
     # NOTE: AcctOwnr and DcsnMakr have DIFFERENT shapes in the richer ESMA payload schema:
     #   AcctOwnr[]: {Id: {LEI, MIC, Prsn: {FrstNm, Nm, BirthDt, Othr: {Id, SchmeNm}}, Intl}, CtryOfBrnch}
@@ -595,6 +597,7 @@ def transaction_party():
                 F.col("New.TxId").alias("transaction_id"),
                 F.lit(side).alias("side"),
                 F.lit("ACCT_OWNR").alias("party_role"),
+                F.col("reporting_date"),
                 F.col("_ingested_at").alias("ingested_at"),
                 F.posexplode_outer(F.col(array_path)).alias("sequence_no", "_party"),
             )
@@ -605,6 +608,7 @@ def transaction_party():
                 "side",
                 "party_role",
                 "sequence_no",
+                F.col("reporting_date"),
                 F.col("_party.Id.LEI").alias("party_lei"),
                 # Id.Othr.* doesn't exist on AcctOwnr.Id (Id is choice of LEI/MIC/Prsn/Intl)
                 F.lit(None).cast("string").alias("party_other_id"),
@@ -633,6 +637,7 @@ def transaction_party():
                 F.col("New.TxId").alias("transaction_id"),
                 F.lit(side).alias("side"),
                 F.lit("DCSN_MAKR").alias("party_role"),
+                F.col("reporting_date"),
                 F.col("_ingested_at").alias("ingested_at"),
                 F.posexplode_outer(F.col(array_path)).alias("sequence_no", "_party"),
             )
@@ -643,6 +648,7 @@ def transaction_party():
                 "side",
                 "party_role",
                 "sequence_no",
+                F.col("reporting_date"),
                 # DcsnMakr has flat LEI (no .Id wrapper)
                 F.col("_party.LEI").alias("party_lei"),
                 F.lit(None).cast("string").alias("party_other_id"),
