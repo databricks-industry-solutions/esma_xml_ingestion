@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import ast
 import os
 import re
 import markdown
@@ -64,11 +65,104 @@ def add_anchor_ids_to_headings(md_content):
     return '\n'.join(processed_lines)
 
 
+def parse_python_module(filepath):
+    """Parse a standard Python module via AST into Databricks-notebook-style cells.
+
+    Used for plain Python modules without `# COMMAND ----------` markers
+    (e.g., the SDP pipelines under src/pipelines/). Produces the same
+    list-of-cells shape the HTML renderer expects:
+
+      1. Module docstring -> markdown cell
+      2. For each top-level function / class / decorated definition,
+         in source order:
+           - markdown cell: '## <name>' + the function's docstring
+           - code cell:    the function's full source, including decorators
+      3. Any code between definitions (imports, constants, comment blocks)
+         is emitted as code cells in source order.
+
+    Falls back to a single code cell on SyntaxError so the page still
+    renders something useful even if AST parsing fails.
+    """
+    with open(filepath, 'r') as f:
+        source = f.read()
+    source_lines = source.split('\n')
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return [{'type': 'code', 'content': source}]
+
+    cells = []
+    cursor = 0  # next source-line index to emit from
+
+    # 1. Module docstring (always emitted first if present)
+    module_doc = ast.get_docstring(tree)
+    if module_doc:
+        # Skip past the docstring node in the source
+        docstring_node = tree.body[0]
+        cursor = docstring_node.end_lineno
+        md = add_anchor_ids_to_headings(f"# {os.path.basename(filepath)}\n\n{module_doc}")
+        cells.append({'type': 'markdown', 'content': md})
+
+    # 2. Identify top-level def/class regions, including their decorators
+    def_regions = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            start = node.lineno - 1  # AST is 1-indexed
+            if node.decorator_list:
+                start = min(d.lineno for d in node.decorator_list) - 1
+            def_regions.append({
+                'name': node.name,
+                'start': start,
+                'end': node.end_lineno,
+                'docstring': ast.get_docstring(node),
+            })
+    def_regions.sort(key=lambda r: r['start'])
+
+    # 3. Walk definitions in source order, emitting any preamble code
+    #    (imports, constants, top-level statements) between them.
+    for region in def_regions:
+        if cursor < region['start']:
+            preamble = '\n'.join(source_lines[cursor:region['start']]).rstrip()
+            if preamble.strip():
+                cells.append({'type': 'code', 'content': preamble})
+
+        # Section header + docstring as a markdown cell
+        title = region['name']
+        md = f"## {title}"
+        if region['docstring']:
+            md = f"{md}\n\n{region['docstring']}"
+        md = add_anchor_ids_to_headings(md)
+        cells.append({'type': 'markdown', 'content': md})
+
+        # The function's source code
+        func_source = '\n'.join(source_lines[region['start']:region['end']])
+        cells.append({'type': 'code', 'content': func_source})
+
+        cursor = region['end']
+
+    # 4. Trailing code (anything after the last definition)
+    if cursor < len(source_lines):
+        trailing = '\n'.join(source_lines[cursor:]).rstrip()
+        if trailing.strip():
+            cells.append({'type': 'code', 'content': trailing})
+
+    return cells
+
+
 def parse_databricks_notebook(filepath):
-    """Parse a Databricks .py notebook format into cells"""
+    """Parse a Databricks .py notebook format OR plain Python module into cells.
+
+    Auto-routes: if `# COMMAND ----------` markers are present, treats
+    the file as a Databricks source-format notebook. Otherwise routes to
+    `parse_python_module` (used for the SDP pipelines in src/pipelines/).
+    """
     with open(filepath, 'r') as f:
         content = f.read()
-    
+
+    if '# COMMAND ----------' not in content:
+        return parse_python_module(filepath)
+
     # Split by COMMAND ----------
     sections = re.split(r'# COMMAND ----------', content)
     cells = []
@@ -131,30 +225,40 @@ def parse_databricks_notebook(filepath):
 
 
 def extract_headers_from_markdown(md_content):
-    """Extract H2 and H3 headers from markdown content for navigation"""
+    """Extract H2 and H3 headers from markdown content for navigation.
+
+    If the heading text has already been wrapped with
+    `<span id="..."></span>` by `add_anchor_ids_to_headings`, reuse that
+    ID (so the sidebar link and the in-page anchor agree) and strip the
+    span tag from the display text. Otherwise derive a URL-safe ID from
+    the raw text.
+    """
     headers = []
+    span_pattern = re.compile(r'^<span\s+id="([^"]+)"></span>(.*)$')
     for line in md_content.split('\n'):
         line = line.strip()
         if line.startswith('## ') and not line.startswith('### '):
             text = line[3:].strip()
-            # Create URL-safe ID
-            header_id = re.sub(r'[^\w\s-]', '', text.lower())
-            header_id = re.sub(r'[-\s]+', '-', header_id).strip('-')
-            headers.append({
-                'level': 2,
-                'text': text,
-                'id': header_id
-            })
+            level = 2
         elif line.startswith('### '):
             text = line[4:].strip()
-            # Create URL-safe ID
+            level = 3
+        else:
+            continue
+
+        span_match = span_pattern.match(text)
+        if span_match:
+            header_id = span_match.group(1)
+            text = span_match.group(2).strip()
+        else:
             header_id = re.sub(r'[^\w\s-]', '', text.lower())
             header_id = re.sub(r'[-\s]+', '-', header_id).strip('-')
-            headers.append({
-                'level': 3,
-                'text': text,
-                'id': header_id
-            })
+
+        headers.append({
+            'level': level,
+            'text': text,
+            'id': header_id,
+        })
     return headers
 
 
@@ -226,18 +330,26 @@ def convert_to_html_fragment(filepath):
 
 
 if __name__ == "__main__":
-    # Process all Databricks .py notebooks under src/notebooks/.
-    # SDP pipelines under src/pipelines/ are standard Python modules
-    # (no `# COMMAND ----------` / `# MAGIC %md` markers) — they're
-    # intentionally NOT rendered here; the README links to them on GitHub.
+    # Process both:
+    #   - Databricks .py notebooks under src/notebooks/ (with
+    #     `# COMMAND ----------` / `# MAGIC %md` markers)
+    #   - SDP pipelines under src/pipelines/ (standard Python modules;
+    #     parsed via AST into per-function sections so docstrings and
+    #     @dp.table definitions render as navigable subsections)
+    # `parse_databricks_notebook` auto-detects the format.
     notebook_data = {}
     notebook_headers = {}
-    for py_file in glob.glob('src/notebooks/*.py'):
-        if not py_file.endswith('__init__.py'):  # Skip __init__.py files
-            name, fragment, headers = convert_to_html_fragment(py_file)
-            notebook_data[name] = fragment
-            notebook_headers[name] = headers
-            print(f"Converted {py_file} to HTML fragment with {len(headers)} headers")
+    py_files = sorted(
+        list(glob.glob('src/notebooks/*.py'))
+        + list(glob.glob('src/pipelines/*.py'))
+    )
+    for py_file in py_files:
+        if py_file.endswith('__init__.py'):  # Skip __init__.py files
+            continue
+        name, fragment, headers = convert_to_html_fragment(py_file)
+        notebook_data[name] = fragment
+        notebook_headers[name] = headers
+        print(f"Converted {py_file} to HTML fragment with {len(headers)} headers")
     
     # Write notebook data to JSON files for the main script
     import json
