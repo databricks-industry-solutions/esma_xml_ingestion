@@ -5,9 +5,16 @@
 #   2. Replace every `new-type` with your regulation's lowercase prefix
 #      (e.g., `csdr`, `sftr`)
 #   3. Replace every `New-Type` and `NEW_TYPE` with the appropriate case
-#   4. Add matching `${var.<prefix>_*}` defaults to bundle.variables.yml
-#      (including `<prefix>_enable_xsd_validation` for the Auto Loader
-#      XSD-validation toggle consumed by src/pipelines/xml_loader.py).
+#   4. Add matching `${var.<prefix>_*}` defaults to bundle.variables.yml,
+#      including:
+#        - `<prefix>_enable_xsd_validation`     — Auto Loader XSD-validation toggle
+#        - `<prefix>_enable_filename_regex`     — filename-regex enrichment toggle
+#        - `<prefix>_clean_source_mode`         — OFF | MOVE | DELETE (recommended: MOVE)
+#        - `<prefix>_clean_source_retention`    — e.g. "7 days"
+#        - `<prefix>_processed_path`            — UC volume archive path used as the
+#                                                 cleanSource MOVE destination (must
+#                                                 be in the same volume/location as
+#                                                 the landing path).
 #   5. (Optional) Add target overrides for development=true|false in
 #      databricks.yml under targets.{dev,prod}.resources.pipelines.
 
@@ -96,3 +103,6 @@ resources:
         xml_xsd_schema_pyld_path: ${var.new-type_xml_xsd_schema_pyld_path}
         enable_xsd_validation: ${var.new-type_enable_xsd_validation}
         enable_filename_regex: ${var.new-type_enable_filename_regex}
+        clean_source_mode: ${var.new-type_clean_source_mode}
+        clean_source_move_destination: ${var.new-type_processed_path}
+        clean_source_retention: ${var.new-type_clean_source_retention}

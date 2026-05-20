@@ -50,6 +50,30 @@ ENABLE_XSD_VALIDATION = spark.conf.get("enable_xsd_validation", "true").lower() 
 # this file. Tracked as a future enhancement.
 ENABLE_FILENAME_REGEX = spark.conf.get("enable_filename_regex", "true").lower() == "true"
 
+# Auto Loader cleanSource configuration. Controls the lifecycle of files
+# that have been successfully processed by Auto Loader:
+#   - OFF   : files remain in the landing path (default-safe)
+#   - MOVE  : files are archived to CLEAN_SOURCE_MOVE_DEST after
+#             CLEAN_SOURCE_RETENTION has elapsed since processing
+#   - DELETE: files are deleted after the retention period
+#
+# Safety w.r.t. the downstream LXML re-read
+# -----------------------------------------
+# The bronze `raw` table re-reads each file by path (via the lxml UDF
+# `_extract_hdr_pyld_metadata`). `cloudFiles.cleanSource.retentionDuration`
+# is the *waiting period after processing* before a file becomes a
+# cleanup candidate — so as long as `raw` consumes a file within that
+# window, the file is guaranteed to still exist at source. Default
+# "7 days" gives ~1000× the typical inter-batch lag (seconds–minutes)
+# plus operational headroom for backfills / re-runs.
+#
+# moveDestination MUST be inside the same UC volume / external location
+# as the source landing path — cross-bucket moves are rejected by
+# Auto Loader.
+CLEAN_SOURCE_MODE = spark.conf.get("clean_source_mode", "OFF").upper()
+CLEAN_SOURCE_MOVE_DEST = spark.conf.get("clean_source_move_destination", "")
+CLEAN_SOURCE_RETENTION = spark.conf.get("clean_source_retention", "7 days")
+
 # Fully qualified table names — published to {catalog}.{raw_schema}.
 TBL_RAW_XML_PAYLOAD = f"{CATALOG}.{RAW_SCHEMA}.{TABLE_PREFIX}_raw_xml_payload"
 TBL_QUARANTINE = f"{CATALOG}.{RAW_SCHEMA}.{TABLE_PREFIX}_quarantine"
@@ -305,6 +329,26 @@ def raw_xml_payload():
     )
     if ENABLE_XSD_VALIDATION:
         loader = loader.option("rowValidationXSDPath", XML_XSD_SCHEMA_PYLD_PATH)
+
+    # cloudFiles.cleanSource — archive/delete processed files after the
+    # retention period. OFF is a no-op (default-safe). MOVE/DELETE only
+    # become active when the bundle config sets clean_source_mode
+    # accordingly. See the CLEAN_SOURCE_* block at the top of this module
+    # for the safety argument vs the downstream LXML re-read.
+    if CLEAN_SOURCE_MODE in ("MOVE", "DELETE"):
+        loader = (
+            loader
+            .option("cloudFiles.cleanSource", CLEAN_SOURCE_MODE)
+            .option(
+                "cloudFiles.cleanSource.retentionDuration",
+                CLEAN_SOURCE_RETENTION,
+            )
+        )
+        if CLEAN_SOURCE_MODE == "MOVE":
+            loader = loader.option(
+                "cloudFiles.cleanSource.moveDestination",
+                CLEAN_SOURCE_MOVE_DEST,
+            )
     df = (
         loader
         .schema(XML_PYLD_SCHEMA)

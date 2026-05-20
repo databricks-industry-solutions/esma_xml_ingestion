@@ -59,6 +59,14 @@ variables:
     description: "Whether to extract FileBatchIndex/FileBatchSize/FileVersion/ESMADate from EMIR XML filenames via the ESMA naming-convention regex. 'true' (default) or 'false' to skip (columns emit NULL)."
     default: "true"
 
+  emir_clean_source_mode:
+    description: "Auto Loader cloudFiles.cleanSource mode for EMIR landing files: 'OFF' (default-safe), 'MOVE' (archive to emir_processed_path), or 'DELETE'. MOVE recommended for production."
+    default: "MOVE"
+
+  emir_clean_source_retention:
+    description: "cloudFiles.cleanSource.retentionDuration — waiting period after a file is processed before it becomes eligible for archival/deletion. Must exceed the worst-case lag between the bronze raw_xml_payload commit and the downstream raw() LXML re-read. CalendarInterval string (e.g. '7 days', '1 day', '12 hours')."
+    default: "7 days"
+
   # EMIR Schema Creation Job Variables
   emir_schema_max_concurrent_runs:
     default: 1
@@ -122,6 +130,14 @@ variables:
   mifir_enable_filename_regex:
     description: "Whether to extract FileBatchIndex/FileBatchSize/FileVersion/ESMADate from MiFIR XML filenames via the ESMA naming-convention regex. 'true' (default) or 'false' to skip (columns emit NULL)."
     default: "true"
+
+  mifir_clean_source_mode:
+    description: "Auto Loader cloudFiles.cleanSource mode for MiFIR landing files: 'OFF' (default-safe), 'MOVE' (archive to mifir_processed_path), or 'DELETE'. MOVE recommended for production."
+    default: "MOVE"
+
+  mifir_clean_source_retention:
+    description: "cloudFiles.cleanSource.retentionDuration — waiting period after a file is processed before it becomes eligible for archival/deletion. Must exceed the worst-case lag between the bronze raw_xml_payload commit and the downstream raw() LXML re-read. CalendarInterval string (e.g. '7 days', '1 day', '12 hours')."
+    default: "7 days"
 
   # MiFIR Schema Creation Job Variables
   mifir_schema_max_concurrent_runs:

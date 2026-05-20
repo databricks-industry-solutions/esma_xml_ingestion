@@ -97,6 +97,9 @@ resources:
         xml_xsd_schema_pyld_path: ${var.emir_xml_xsd_schema_pyld_path}
         enable_xsd_validation: ${var.emir_enable_xsd_validation}
         enable_filename_regex: ${var.emir_enable_filename_regex}
+        clean_source_mode: ${var.emir_clean_source_mode}
+        clean_source_move_destination: ${var.emir_processed_path}
+        clean_source_retention: ${var.emir_clean_source_retention}
 
     emir_silver_pipeline:
       name: "EMIR Silver (domain-driven)"

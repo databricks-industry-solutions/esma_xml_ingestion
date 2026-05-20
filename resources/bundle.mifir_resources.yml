@@ -97,6 +97,9 @@ resources:
         xml_xsd_schema_pyld_path: ${var.mifir_xml_xsd_schema_pyld_path}
         enable_xsd_validation: ${var.mifir_enable_xsd_validation}
         enable_filename_regex: ${var.mifir_enable_filename_regex}
+        clean_source_mode: ${var.mifir_clean_source_mode}
+        clean_source_move_destination: ${var.mifir_processed_path}
+        clean_source_retention: ${var.mifir_clean_source_retention}
 
     mifir_silver_pipeline:
       name: "MiFIR Silver (domain-driven)"
