@@ -1,44 +1,38 @@
-# Databricks notebook source
-# MAGIC %md
-# MAGIC # ESMA MiFIR Transaction-Reporting Silver Layer
-# MAGIC
-# MAGIC Domain-driven silver layer on top of bronze `mifir_raw`
-# MAGIC (auth.016.001.01_ESMAUG_Reporting). Three tables:
-# MAGIC
-# MAGIC * `transaction` — wide-flat fact table, one row per `<Tx>` element
-# MAGIC   with `action_type` discriminator (NEW / CXL). ~135 scalars +
-# MAGIC   ~15 array columns covering identification, buyer/seller flat,
-# MAGIC   trade details, instrument + 6 underlying-instrument prefix groups,
-# MAGIC   investment-decision person, executing person, additional attributes,
-# MAGIC   audit.
-# MAGIC * `transaction_party` — unified explode of Buyr.AcctOwnr +
-# MAGIC   Buyr.DcsnMakr + Sellr.AcctOwnr + Sellr.DcsnMakr with side and
-# MAGIC   party_role discriminators. ~18 cols.
-# MAGIC * `submission_file` — MiFIR-specific envelope including UVHeader
-# MAGIC   (UnaVista vendor wrapper) + full BizAppHeader (AppHdr top-level +
-# MAGIC   Sender/Recipient OrgId + FIId blocks + 135-leaf Rltd related-
-# MAGIC   message mirror). ~270 cols.
-# MAGIC
-# MAGIC All inputs are supplied via `spark.conf` — see the MiFIR silver
-# MAGIC pipeline `configuration` block in
-# MAGIC `resources/bundle.mifir_resources.yml`.
+"""ESMA MiFIR Transaction-Reporting Silver Layer.
 
-# COMMAND ----------
+Domain-driven silver layer on top of bronze ``mifir_raw``
+(auth.016.001.01_ESMAUG_Reporting). Three tables:
+
+* ``transaction`` — wide-flat fact table, one row per ``<Tx>`` element
+  with ``action_type`` discriminator (NEW / CXL). ~135 scalars +
+  ~15 array columns covering identification, buyer/seller flat,
+  trade details, instrument + 6 underlying-instrument prefix groups,
+  investment-decision person, executing person, additional attributes,
+  audit.
+* ``transaction_party`` — unified explode of Buyr.AcctOwnr +
+  Buyr.DcsnMakr + Sellr.AcctOwnr + Sellr.DcsnMakr with side and
+  party_role discriminators. ~18 cols.
+* ``submission_file`` — MiFIR-specific envelope including UVHeader
+  (UnaVista vendor wrapper) + full BizAppHeader (AppHdr top-level +
+  Sender/Recipient OrgId + FIId blocks + 135-leaf Rltd related-
+  message mirror). ~270 cols.
+
+All inputs are supplied via ``spark.conf`` — see the MiFIR silver
+pipeline ``configuration`` block in
+``resources/bundle.mifir_resources.yml``.
+"""
 
 from __future__ import annotations
 
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 from pyspark.sql import DataFrame
-# COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Pipeline configuration
-# MAGIC
-# MAGIC Values are set in `resources/bundle.mifir_resources.yml` under
-# MAGIC `resources.pipelines.mifir_silver_pipeline.configuration`.
+# --------------------------------------------------------------------------
+# Pipeline configuration (set in resources/bundle.mifir_resources.yml under
+# resources.pipelines.mifir_silver_pipeline.configuration).
+# --------------------------------------------------------------------------
 
-# COMMAND ----------
 CATALOG = spark.conf.get("catalog")
 RAW_SCHEMA = spark.conf.get("raw_schema")
 SILVER_SCHEMA = spark.conf.get("silver_schema", RAW_SCHEMA)
@@ -50,23 +44,23 @@ TBL_BRONZE = f"{CATALOG}.{RAW_SCHEMA}.{BRONZE_TABLE_NAME}"
 TBL_TRANSACTION = f"{CATALOG}.{SILVER_SCHEMA}.transaction"
 TBL_TRANSACTION_PARTY = f"{CATALOG}.{SILVER_SCHEMA}.transaction_party"
 TBL_SUBMISSION_FILE = f"{CATALOG}.{SILVER_SCHEMA}.submission_file"
-# COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Filename regex extraction (customer-replaceable).
-# MAGIC
-# MAGIC Default MiFIR convention (e.g., 9795_20250729154019_3_sample_data.xml):
-# MAGIC   <client_id>_<YYYYMMDDhhmmss>_<sequence>_<rest>.xml
-# MAGIC
-# MAGIC TODO (customer): customers with a different filename convention should
-# MAGIC REPLACE THIS FUNCTION rather than editing the @dp.table definitions.
-# MAGIC The four output column names must stay the same so downstream consumers
-# MAGIC keep working; the extraction logic inside is yours to redefine.
-# MAGIC
-# MAGIC Set ENABLE_FILENAME_REGEX=false to skip extraction entirely (columns
-# MAGIC emit NULL while preserving the schema).
 
-# COMMAND ----------
+# --------------------------------------------------------------------------
+# Filename regex extraction (customer-replaceable).
+#
+# Default MiFIR convention (e.g., 9795_20250729154019_3_sample_data.xml):
+#   <client_id>_<YYYYMMDDhhmmss>_<sequence>_<rest>.xml
+#
+# TODO (customer): customers with a different filename convention should
+# REPLACE THIS FUNCTION rather than editing the @dp.table definitions.
+# The four output column names must stay the same so downstream consumers
+# keep working; the extraction logic inside is yours to redefine.
+#
+# Set ENABLE_FILENAME_REGEX=false to skip extraction entirely (columns
+# emit NULL while preserving the schema).
+# --------------------------------------------------------------------------
+
 _MIFIR_CLIENT_ID_PATTERN = r"^(\d+)_"
 _MIFIR_TIMESTAMP_PATTERN = r"^\d+_(\d{14})_"
 _MIFIR_SEQUENCE_PATTERN = r"^\d+_\d{14}_(\d+)_"
@@ -128,17 +122,18 @@ def _reporting_date(df: DataFrame) -> DataFrame:
             F.to_date(F.col("_file_modification_time")),
         ),
     )
-# COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Table 1 of 3: submission_file (MiFIR-specific file-level envelope)
-# MAGIC
-# MAGIC Built incrementally — each subsequent commit adds one logical section.
-# MAGIC Final shape: ~270 columns covering UVHeader + full BizAppHeader (AppHdr
-# MAGIC top-level + Sender Fr.OrgId/FIId + Recipient To.OrgId/FIId + Rltd
-# MAGIC related-message mirror) per spec §4.3.
 
-# COMMAND ----------
+# --------------------------------------------------------------------------
+# Table 1 of 3: submission_file (MiFIR-specific file-level envelope)
+#
+# Built incrementally — each subsequent commit adds one logical section.
+# Final shape: ~270 columns covering UVHeader + full BizAppHeader (AppHdr
+# top-level + Sender Fr.OrgId/FIId + Recipient To.OrgId/FIId + Rltd
+# related-message mirror) per spec §4.3.
+# --------------------------------------------------------------------------
+
+
 @dp.table(
     name=TBL_SUBMISSION_FILE,
     comment=(
@@ -557,16 +552,17 @@ def submission_file():
             F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Rltd.To.FIId.BrnchId.PstlAdr.AdrLine").alias("related_recipient_fi_branch_address_lines"),
         )
     )
-# COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Table 2 of 3: transaction_party (unified party explode)
-# MAGIC
-# MAGIC Built via four posexplode_outer operations (one per array), unioned
-# MAGIC with side ∈ {BUYER, SELLER} and party_role ∈ {ACCT_OWNR, DCSN_MAKR}
-# MAGIC discriminators. Filtered to drop NULL rows from posexplode_outer.
 
-# COMMAND ----------
+# --------------------------------------------------------------------------
+# Table 2 of 3: transaction_party (unified party explode)
+#
+# Built via four posexplode_outer operations (one per array), unioned
+# with side ∈ {BUYER, SELLER} and party_role ∈ {ACCT_OWNR, DCSN_MAKR}
+# discriminators. Filtered to drop NULL rows from posexplode_outer.
+# --------------------------------------------------------------------------
+
+
 @dp.table(
     name=TBL_TRANSACTION_PARTY,
     comment=(
@@ -678,17 +674,18 @@ def transaction_party():
         .unionByName(_explode_acct_ownr("SELLER", "New.Sellr.AcctOwnr"), allowMissingColumns=True)
         .unionByName(_explode_dcsn_makr("SELLER", "New.Sellr.DcsnMakr"), allowMissingColumns=True)
     )
-# COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Table 3 of 3: transaction (main fact, ~135 scalars + ~15 arrays)
-# MAGIC
-# MAGIC One row per <Tx> element. action_type discriminator: NEW (full
-# MAGIC transaction with all fields) or CXL (cancellation, 3 shared fields
-# MAGIC only — rest NULL). Built incrementally — each subsequent commit adds
-# MAGIC one logical XSD section's columns to the .select(...) below.
 
-# COMMAND ----------
+# --------------------------------------------------------------------------
+# Table 3 of 3: transaction (main fact, ~135 scalars + ~15 arrays)
+#
+# One row per <Tx> element. action_type discriminator: NEW (full
+# transaction with all fields) or CXL (cancellation, 3 shared fields
+# only — rest NULL). Built incrementally — each subsequent commit adds
+# one logical XSD section's columns to the .select(...) below.
+# --------------------------------------------------------------------------
+
+
 @dp.table(
     name=TBL_TRANSACTION,
     comment=(

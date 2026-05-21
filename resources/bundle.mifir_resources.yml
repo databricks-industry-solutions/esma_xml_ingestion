@@ -42,7 +42,7 @@ resources:
       continuous: false
 
       libraries:
-        - notebook:
+        - file:
             path: ../src/pipelines/xml_loader.py
 
       environment:
@@ -75,7 +75,7 @@ resources:
       continuous: false
 
       libraries:
-        - notebook:
+        - file:
             path: ../src/pipelines/silver_mifir.py
 
       configuration:

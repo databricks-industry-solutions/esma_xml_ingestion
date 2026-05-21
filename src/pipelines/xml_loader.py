@@ -1,17 +1,13 @@
-# Databricks notebook source
-# MAGIC %md
-# MAGIC # ESMA XML Loader — Spark Declarative Pipeline (Bronze)
-# MAGIC
-# MAGIC Parameterised SDP source backing both the EMIR and MiFIR XML loader
-# MAGIC pipelines. Reads XML files via Auto Loader, splits malformed rows into a
-# MAGIC quarantine table enriched with an `lxml` XSD-validation error, and
-# MAGIC produces a public `{prefix}_raw` streaming table with payload + header
-# MAGIC metadata joined per file.
-# MAGIC
-# MAGIC All inputs are supplied via `spark.conf` — see the bundle pipeline
-# MAGIC `configuration` block in `resources/bundle.{emir,mifir}_resources.yml`.
+"""ESMA XML Loader — Spark Declarative Pipeline.
 
-# COMMAND ----------
+Parameterized SDP source backing both the EMIR and MiFIR XML loader pipelines.
+Reads XML files via Auto Loader, splits malformed rows into a quarantine table
+enriched with an lxml XSD-validation error, and produces a public
+``{prefix}_raw`` streaming table with payload + header metadata joined per file.
+
+All inputs are supplied via ``spark.conf`` — see the bundle pipeline
+``configuration`` block in ``resources/bundle.{emir,mifir}_resources.yml``.
+"""
 
 from __future__ import annotations
 
@@ -21,16 +17,11 @@ from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 from pyspark.sql.types import StringType, StructType
 
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Pipeline configuration
-# MAGIC
-# MAGIC Values are set in `resources/bundle.*_resources.yml` under
-# MAGIC `resources.pipelines.<name>.configuration`. All are resolved at import
-# MAGIC time so the `@dp.table` decorators can reference them.
-
-# COMMAND ----------
+# --------------------------------------------------------------------------
+# Pipeline configuration (set in resources/bundle.*_resources.yml under
+# resources.pipelines.<name>.configuration). All values are resolved at
+# import time so the @dp.table decorators can reference them.
+# --------------------------------------------------------------------------
 
 CATALOG = spark.conf.get("catalog")
 RAW_SCHEMA = spark.conf.get("raw_schema")
@@ -40,7 +31,6 @@ ROW_TAG = spark.conf.get("row_tag")
 XML_SCHEMA_PYLD_PATH = spark.conf.get("xml_schema_pyld_path")
 XML_SCHEMA_HDR_PYLD_METADATA_PATH = spark.conf.get("xml_schema_hdr_pyld_metadata_path")
 XML_XSD_SCHEMA_PYLD_PATH = spark.conf.get("xml_xsd_schema_pyld_path")
-
 # Pipeline-config values are always strings; "true"/"false" toggles row-level
 # XSD enforcement (rowValidationXSDPath) in raw_xml_payload and the xsd_error
 # UDF in quarantine. Default ON preserves production behavior.
@@ -51,24 +41,33 @@ ENABLE_XSD_VALIDATION = spark.conf.get("enable_xsd_validation", "true").lower() 
 # FileVersion/ESMADate. Set to "false" for non-ESMA customers whose
 # filenames don't match the `\d{6}-\d_\d{6}_` pattern; the four columns
 # stay in the output schema but emit NULL passthrough.
+#
+# TODO (customer): for full flexibility, expose filename_index_pattern
+# and filename_date_pattern (plus the substring offsets) as their own
+# config keys so customers can supply their own regex without forking
+# this file. Tracked as a future enhancement.
 ENABLE_FILENAME_REGEX = spark.conf.get("enable_filename_regex", "true").lower() == "true"
 
 # Auto Loader cleanSource configuration. Controls the lifecycle of files
 # that have been successfully processed by Auto Loader:
-#   - OFF    : files remain in the landing path (default-safe)
-#   - MOVE   : files are archived to CLEAN_SOURCE_MOVE_DEST after
-#              CLEAN_SOURCE_RETENTION has elapsed since processing
-#   - DELETE : files are deleted after the retention period
+#   - OFF   : files remain in the landing path (default-safe)
+#   - MOVE  : files are archived to CLEAN_SOURCE_MOVE_DEST after
+#             CLEAN_SOURCE_RETENTION has elapsed since processing
+#   - DELETE: files are deleted after the retention period
 #
-# Safety w.r.t. the downstream LXML re-read:
+# Safety w.r.t. the downstream LXML re-read
+# -----------------------------------------
 # The bronze `raw` table re-reads each file by path (via the lxml UDF
 # `_extract_hdr_pyld_metadata`). `cloudFiles.cleanSource.retentionDuration`
-# is the *waiting period after processing* before a file becomes a cleanup
-# candidate — so as long as `raw` consumes a file within that window, the
-# file is guaranteed to still exist at source. Default "7 days" gives
-# ~1000× the typical inter-batch lag plus operational headroom for
-# backfills / re-runs. moveDestination MUST be inside the same UC volume
-# / external location as the source landing path.
+# is the *waiting period after processing* before a file becomes a
+# cleanup candidate — so as long as `raw` consumes a file within that
+# window, the file is guaranteed to still exist at source. Default
+# "7 days" gives ~1000× the typical inter-batch lag (seconds–minutes)
+# plus operational headroom for backfills / re-runs.
+#
+# moveDestination MUST be inside the same UC volume / external location
+# as the source landing path — cross-bucket moves are rejected by
+# Auto Loader.
 CLEAN_SOURCE_MODE = spark.conf.get("clean_source_mode", "OFF").upper()
 CLEAN_SOURCE_MOVE_DEST = spark.conf.get("clean_source_move_destination", "")
 CLEAN_SOURCE_RETENTION = spark.conf.get("clean_source_retention", "7 days")
@@ -78,34 +77,35 @@ TBL_RAW_XML_PAYLOAD = f"{CATALOG}.{RAW_SCHEMA}.{TABLE_PREFIX}_raw_xml_payload"
 TBL_QUARANTINE = f"{CATALOG}.{RAW_SCHEMA}.{TABLE_PREFIX}_quarantine"
 TBL_RAW = f"{CATALOG}.{RAW_SCHEMA}.{TABLE_PREFIX}_raw"
 
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Filename regex extraction
-# MAGIC
-# MAGIC Customer-replaceable helper. Default implementation parses the ESMA
-# MAGIC naming convention:
-# MAGIC
-# MAGIC `<6-digit batch index>-<1-digit batch size>_<6-digit YYMMDD>_*.xml`
-# MAGIC
-# MAGIC Customers with a different filename convention should REPLACE this
-# MAGIC function rather than editing the `@dp.table` definitions. The four
-# MAGIC output column names must stay the same so downstream silver consumers
-# MAGIC keep working; the extraction logic inside is yours to redefine.
-# MAGIC
-# MAGIC The toggle `ENABLE_FILENAME_REGEX` (config key `enable_filename_regex`)
-# MAGIC short-circuits this function to emit NULL passthrough — useful when
-# MAGIC filenames don't match any convention and the columns are wanted as a
-# MAGIC placeholder only.
-
-# COMMAND ----------
-
+# Filename-regex patterns used inside the inline self-join in `raw` to
+# extract FileBatchIndex / FileBatchSize / FileVersion / ESMADate from
+# the source XML filename. Module-level so they're compiled once.
 _FILE_INDEX_PATTERN = r"\d\d\d\d\d\d-\d"
 _ESMA_DATE_PATTERN = r"-\d\d\d\d\d\d_"
 
 
 def _add_filename_regex_columns(df):
-    """Add four filename-derived columns: FileBatchIndex, FileBatchSize, FileVersion, ESMADate."""
+    """Add filename-derived columns to a DataFrame that has a ``file_name`` column.
+
+    Returns the DataFrame with four columns appended:
+    ``FileBatchIndex``, ``FileBatchSize``, ``FileVersion``, ``ESMADate``.
+
+    Default implementation parses the ESMA naming convention:
+    ``<6-digit batch index>-<1-digit batch size>_<6-digit YYMMDD>_*.xml``
+
+    Customer customization
+    ----------------------
+    Customers with a different filename convention should REPLACE THIS
+    FUNCTION (or fork the source and override) rather than editing the
+    @dp.table definitions. The four output column names must stay the
+    same so downstream silver / flatten consumers keep working; the
+    extraction logic inside is yours to redefine.
+
+    The toggle ``ENABLE_FILENAME_REGEX`` (config key
+    ``enable_filename_regex``) short-circuits this function to emit
+    NULL passthrough — useful when filenames don't match any
+    convention and the columns are wanted as a placeholder only.
+    """
     if not ENABLE_FILENAME_REGEX:
         return (
             df
@@ -158,21 +158,14 @@ def _add_filename_regex_columns(df):
         )
     )
 
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Schema loading
-# MAGIC
-# MAGIC The Spark JSON schemas (`pyld_schema.json`,
-# MAGIC `hdr_pyld_metadata_schema.json`) and the row-tag XSD
-# MAGIC (`row_tag_schema.xsd`) are pre-generated by the Schema Prep notebook
-# MAGIC (`src/notebooks/0_1_xml_schema_xsd.py`) and live in a UC Volume next
-# MAGIC to the source XSDs.
-
-# COMMAND ----------
 
 def _read_schema(file_path: str) -> StructType:
-    """Load a Spark JSON schema file into a StructType."""
+    """Load a Spark JSON schema file into a StructType.
+
+    Schemas are pre-generated by the Schema Prep notebook
+    (``src/notebooks/0_1_xml_schema_xsd.py``) and live as JSON files in
+    a UC Volume next to the source XSDs.
+    """
     with open(file_path, "r") as f:
         return StructType.fromJson(json.loads(f.read()))
 
@@ -181,18 +174,16 @@ def _read_schema(file_path: str) -> StructType:
 XML_PYLD_SCHEMA: StructType = _read_schema(XML_SCHEMA_PYLD_PATH)
 XML_HDR_PYLD_METADATA_SCHEMA: StructType = _read_schema(XML_SCHEMA_HDR_PYLD_METADATA_PATH)
 
-# COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## XSD-validation UDF
-# MAGIC
-# MAGIC Used by the quarantine table only. The XSD schema object is compiled
-# MAGIC once per Python worker per XSD path via `_xsd_cache` — Auto Loader's
-# MAGIC per-row XSD validation already runs upstream; this UDF only fires on
-# MAGIC the small minority of rows that already failed validation, where we
-# MAGIC want a human-readable error to surface in the quarantine table.
-
-# COMMAND ----------
+# --------------------------------------------------------------------------
+# XSD-validation UDF (used by the quarantine table only).
+#
+# The XSD schema object is compiled once per Python worker per XSD path
+# via _xsd_cache — Auto Loader's per-row XSD validation already runs
+# upstream; this UDF only fires on the small minority of rows that
+# already failed validation, where we want a human-readable error to
+# surface in the quarantine table.
+# --------------------------------------------------------------------------
 
 _xsd_cache: dict = {}
 
@@ -219,17 +210,17 @@ def xsd_error(xml_str: str, xsd_path: str) -> str:
     except Exception as e:
         return f"Invalid XML: {str(e)}"
 
-# COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Header-extraction UDF
-# MAGIC
-# MAGIC Reads each XML file via `lxml.iterparse`, stops at the first row-tag
-# MAGIC element, strips empty elements, and returns the header-only XML as a
-# MAGIC string. Lenient on failure (returns `None`) — a `dp.expect` on the
-# MAGIC parsed header struct is a deliberate follow-up.
+# --------------------------------------------------------------------------
+# Header-extraction UDF.
+#
+# Reads the XML file via lxml.iterparse, stops at the first row-tag
+# element, strips empty elements, and returns the header-only XML as a
+# string. Lenient on failure (returns None) — preserving today's
+# notebook behavior. A dp.expect on the parsed header struct is a
+# deliberate follow-up, not part of this branch.
+# --------------------------------------------------------------------------
 
-# COMMAND ----------
 
 def _strip_namespace(tag: str) -> str:
     """Strip ``{ns}name`` prefix from an lxml tag."""
@@ -302,22 +293,19 @@ def _extract_hdr_pyld_metadata(file_path: str, row_tag: str) -> str | None:
 
 extract_hdr_pyld_metadata_udf = F.udf(_extract_hdr_pyld_metadata, StringType())
 
-# COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Table 1 of 3 — `{prefix}_raw_xml_payload` (internal)
-# MAGIC
-# MAGIC Auto Loader reads XML files from the landing path. **All** rows (good
-# MAGIC and corrupted) land here. Downstream tables filter on
-# MAGIC `corrupted_record`.
-# MAGIC
-# MAGIC When `ENABLE_XSD_VALIDATION` is False, `rowValidationXSDPath` is
-# MAGIC omitted so XSD pattern facets (e.g. LEI `[A-Z0-9]{18}[0-9]{2}`) are not
-# MAGIC enforced at row level. Rows that still fail JSON-schema parsing
-# MAGIC remain captured in `corrupted_record` and route to the quarantine
-# MAGIC table.
+# --------------------------------------------------------------------------
+# Table 1 of 3: {prefix}_raw_xml_payload (intermediate — internal use)
+#
+# Auto Loader reads XML files from the landing path. ALL rows (good +
+# corrupted) land here. Downstream tables filter on corrupted_record.
+#
+# When ENABLE_XSD_VALIDATION is False, rowValidationXSDPath is omitted
+# so XSD pattern facets (e.g. LEI [A-Z0-9]{18}[0-9]{2}) are not enforced
+# at row level. Rows that still fail JSON-schema parsing remain captured
+# in corrupted_record and route to the quarantine table.
+# --------------------------------------------------------------------------
 
-# COMMAND ----------
 
 @dp.table(
     name=TBL_RAW_XML_PAYLOAD,
@@ -343,8 +331,8 @@ def raw_xml_payload():
     # cloudFiles.cleanSource — archive/delete processed files after the
     # retention period. OFF is a no-op (default-safe). MOVE/DELETE only
     # become active when the bundle config sets clean_source_mode
-    # accordingly. See the CLEAN_SOURCE_* block above for the safety
-    # argument vs the downstream LXML re-read.
+    # accordingly. See the CLEAN_SOURCE_* block at the top of this module
+    # for the safety argument vs the downstream LXML re-read.
     if CLEAN_SOURCE_MODE in ("MOVE", "DELETE"):
         loader = (
             loader
@@ -374,27 +362,27 @@ def raw_xml_payload():
     # Defensive: with a user-supplied schema, some Spark/DBR builds don't
     # materialize the columnNameOfCorruptRecord column unless it's listed
     # in the schema. Add a NULL passthrough so downstream tables (which
-    # filter on corrupted_record IS NOT NULL / IS NULL) keep working.
+    # filter on corrupted_record IS NOT NULL / IS NULL) keep working. On
+    # builds where Auto Loader does emit it, this branch is a no-op.
     if "corrupted_record" not in df.columns:
         df = df.withColumn("corrupted_record", F.lit(None).cast("string"))
     return df
 
-# COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Table 2 of 3 — `{prefix}_quarantine` (public)
-# MAGIC
-# MAGIC Bad rows from `raw_xml_payload` (`corrupted_record IS NOT NULL`),
-# MAGIC enriched with a verbose XSD-validation error from the singleton-cached
-# MAGIC lxml UDF. Public so Ops / data stewards can triage without touching
-# MAGIC pipeline internals.
-# MAGIC
-# MAGIC When `ENABLE_XSD_VALIDATION` is False, the `xsd_error` UDF is skipped
-# MAGIC (it would fail trying to read the XSD) and `xsd_validation_result` is
-# MAGIC the literal `"XSD validation disabled"`; quarantined rows in that mode
-# MAGIC come only from JSON-schema parse failures, not XSD pattern violations.
+# --------------------------------------------------------------------------
+# Table 2 of 3: {prefix}_quarantine (PUBLIC)
+#
+# Bad rows from raw_xml_payload (corrupted_record IS NOT NULL),
+# enriched with a verbose XSD-validation error from the singleton-
+# cached lxml UDF. Public so Ops / data stewards can triage without
+# touching pipeline internals.
+#
+# When ENABLE_XSD_VALIDATION is False, the xsd_error UDF is skipped
+# (it would fail trying to read the XSD) and xsd_validation_result is
+# the literal "XSD validation disabled"; quarantined rows in that mode
+# come only from JSON-schema parse failures, not XSD pattern violations.
+# --------------------------------------------------------------------------
 
-# COMMAND ----------
 
 @dp.table(
     name=TBL_QUARANTINE,
@@ -429,25 +417,24 @@ def quarantine():
         "xsd_validation_result",
     )
 
-# COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Table 3 of 3 — `{prefix}_raw` (public)
-# MAGIC
-# MAGIC Self-joins payload rows with their per-file header metadata, deriving
-# MAGIC **both** sides from a single readStream of `raw_xml_payload`. This
-# MAGIC avoids the cross-flow coordination issue we hit with a separate
-# MAGIC `file_hdr_metadata` streaming table — emit on the first triggered run,
-# MAGIC not the second.
-# MAGIC
-# MAGIC The header subquery deduplicates on `file_path` so the lxml UDF fires
-# MAGIC once per file per trigger, then applies `from_xml` and the filename
-# MAGIC regex (`FileBatchIndex` / `FileBatchSize` / `FileVersion` /
-# MAGIC `ESMADate`).
-# MAGIC
-# MAGIC Consumed downstream by the per-regime silver pipelines.
+# --------------------------------------------------------------------------
+# Table 3 of 3: {prefix}_raw (PUBLIC — drop-in for the flatten notebook)
+#
+# Self-joins payload rows with their per-file header metadata, deriving
+# BOTH sides from a single readStream of raw_xml_payload. This mirrors
+# the legacy notebook's pattern (where both join sides came from the
+# same streaming source) and avoids the cross-flow coordination issue
+# we hit with a separate file_hdr_metadata streaming table — emit on
+# the first triggered run, not the second.
+#
+# The header subquery deduplicates on file_path so the lxml UDF fires
+# once per file per trigger, then applies from_xml and the filename
+# regex (FileBatchIndex / FileBatchSize / FileVersion / ESMADate).
+#
+# Consumed downstream by the per-regime silver pipelines.
+# --------------------------------------------------------------------------
 
-# COMMAND ----------
 
 @dp.table(
     name=TBL_RAW,
