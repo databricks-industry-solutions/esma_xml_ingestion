@@ -48,6 +48,9 @@ scratch/
 # in CI, but the script writes them to the project root so guard against
 # accidental commits when running it locally for testing.
 temp_*_fragment.html
+notebook_fragments.json
+notebook_headers.json
+site/
 *.bak
 *.bak2
 
