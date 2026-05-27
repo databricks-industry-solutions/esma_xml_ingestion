@@ -6,20 +6,31 @@
 # MAGIC · `trade_beneficiary` (exploded) · `submission_file` (per-file envelope).
 # MAGIC Config via `spark.conf` (see `resources/bundle.emir_resources.yml`).
 
-# COMMAND ----------
+Domain-driven silver layer on top of bronze ``emir_raw``. Four tables:
+
+* ``trade`` — wide-flat fact table, one row per ``<Stat>`` per submission
+  snapshot. ~232 scalar columns + array/struct columns for long-tail.
+* ``trade_schedule`` — unified schedule periods (price + notional amount/qty
+  for first/second legs + strike-price schedule for options) with
+  ``schedule_type`` discriminator.
+* ``trade_beneficiary`` — exploded beneficiary array.
+* ``submission_file`` — one row per ingested XML file (regulation-agnostic
+  envelope).
+
+All inputs are supplied via ``spark.conf`` — see the EMIR silver pipeline
+``configuration`` block in ``resources/bundle.emir_resources.yml``.
+"""
 
 from __future__ import annotations
 
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 from pyspark.sql import DataFrame
-# COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Pipeline configuration
 # MAGIC From `resources/bundle.emir_resources.yml` (silver pipeline `configuration`).
 
-# COMMAND ----------
 CATALOG = spark.conf.get("catalog")
 RAW_SCHEMA = spark.conf.get("raw_schema")
 SILVER_SCHEMA = spark.conf.get("silver_schema", RAW_SCHEMA)
@@ -59,7 +70,14 @@ def _reporting_date_from_raw(df: DataFrame) -> DataFrame:
 # MAGIC Regulation-agnostic envelope. MiFIR writes to the same table with
 # MAGIC `regulation='MIFIR'` from its own silver pipeline.
 
-# COMMAND ----------
+# --------------------------------------------------------------------------
+# Table 1 of 4: submission_file (file-level envelope)
+#
+# Regulation-agnostic. MiFIR (and any future regulation) writes to the
+# same table with regulation='MIFIR' under its own silver pipeline.
+# --------------------------------------------------------------------------
+
+
 @dp.table(
     name=TBL_SUBMISSION_FILE,
     comment=(
@@ -113,13 +131,16 @@ def submission_file():
             F.lit(REGULATION).alias("regulation"),
         )
     )
-# COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Table 2 of 4: `trade_beneficiary`
 # MAGIC Exploded `CtrPtySpcfcData.CtrPty.Bnfcry[]`; `beneficiary_type` ∈ LEGAL / NATURAL / OTHER.
 
-# COMMAND ----------
+# --------------------------------------------------------------------------
+# Table 2 of 4: trade_beneficiary (exploded array)
+# --------------------------------------------------------------------------
+
+
 @dp.table(
     name=TBL_TRADE_BENEFICIARY,
     comment=(
@@ -155,14 +176,25 @@ def trade_beneficiary():
         F.col("_ingested_at").alias("ingested_at"),
         F.current_timestamp().alias("silver_processed_at"),
     )
-# COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Table 3 of 4: `trade_schedule`
 # MAGIC Six schedule arrays unified via `schedule_type` discriminator:
 # MAGIC PRICE / NTNL_AMT_LEG_1 / NTNL_AMT_LEG_2 / NTNL_QTY_LEG_1 / NTNL_QTY_LEG_2 / STRIKE.
 
-# COMMAND ----------
+# --------------------------------------------------------------------------
+# Table 3 of 4: trade_schedule (six schedule arrays unified)
+#
+# Source paths:
+#   TxPric.SchdlPrd[]                     -> PRICE
+#   NtnlAmt.FrstLeg.SchdlPrd[]            -> NTNL_AMT_LEG_1
+#   NtnlAmt.ScndLeg.SchdlPrd[]            -> NTNL_AMT_LEG_2
+#   NtnlQty.FrstLeg.Dtls.SchdlPrd[]       -> NTNL_QTY_LEG_1
+#   NtnlQty.ScndLeg.Dtls.SchdlPrd[]       -> NTNL_QTY_LEG_2
+#   Optn.StrkPricSchdl[]                  -> STRIKE
+# --------------------------------------------------------------------------
+
+
 @dp.table(
     name=TBL_TRADE_SCHEDULE,
     comment=(
@@ -275,7 +307,6 @@ def trade_schedule():
         .unionByName(strike_df, allowMissingColumns=True)
     )
     return unioned.withColumn("silver_processed_at", F.current_timestamp())
-# COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Table 4 of 4: `trade`
@@ -283,7 +314,18 @@ def trade_schedule():
 # MAGIC `<Stat>` per snapshot. Choice fields collapsed to LEI + `*_other_id`
 # MAGIC fallback.
 
-# COMMAND ----------
+# --------------------------------------------------------------------------
+# Table 4 of 4: trade (main fact, ~232 scalar cols + 5 arrays + 1 struct)
+#
+# One row per <Stat> per submission snapshot. Wide-flat by design;
+# business-readable column names; choice fields collapsed to LEI common
+# branch + *_other_id fallback. See spec §4.0 for the decision rule.
+#
+# Built incrementally — each commit adds one logical XSD section's
+# columns to the .select(...) below.
+# --------------------------------------------------------------------------
+
+
 @dp.table(
     name=TBL_TRADE,
     comment=(
