@@ -7,38 +7,20 @@
 # MAGIC `submission_file` (UVHeader + BizAppHeader, ~270 cols).
 # MAGIC Config via `spark.conf` (see `resources/bundle.mifir_resources.yml`).
 
-Domain-driven silver layer on top of bronze ``mifir_raw``
-(auth.016.001.01_ESMAUG_Reporting). Three tables:
-
-* ``transaction`` — wide-flat fact table, one row per ``<Tx>`` element
-  with ``action_type`` discriminator (NEW / CXL). ~135 scalars +
-  ~15 array columns covering identification, buyer/seller flat,
-  trade details, instrument + 6 underlying-instrument prefix groups,
-  investment-decision person, executing person, additional attributes,
-  audit.
-* ``transaction_party`` — unified explode of Buyr.AcctOwnr +
-  Buyr.DcsnMakr + Sellr.AcctOwnr + Sellr.DcsnMakr with side and
-  party_role discriminators. ~18 cols.
-* ``submission_file`` — MiFIR-specific envelope including UVHeader
-  (UnaVista vendor wrapper) + full BizAppHeader (AppHdr top-level +
-  Sender/Recipient OrgId + FIId blocks + 135-leaf Rltd related-
-  message mirror). ~270 cols.
-
-All inputs are supplied via ``spark.conf`` — see the MiFIR silver
-pipeline ``configuration`` block in
-``resources/bundle.mifir_resources.yml``.
-"""
+# COMMAND ----------
 
 from __future__ import annotations
 
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 from pyspark.sql import DataFrame
+# COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Pipeline configuration
 # MAGIC From `resources/bundle.mifir_resources.yml` (silver pipeline `configuration`).
 
+# COMMAND ----------
 CATALOG = spark.conf.get("catalog")
 RAW_SCHEMA = spark.conf.get("raw_schema")
 SILVER_SCHEMA = spark.conf.get("silver_schema", RAW_SCHEMA)
@@ -52,6 +34,7 @@ TBL_FILE_HEADERS = f"{CATALOG}.{RAW_SCHEMA}.{FILE_HEADERS_TABLE_NAME}"
 TBL_TRANSACTION = f"{CATALOG}.{SILVER_SCHEMA}.transaction"
 TBL_TRANSACTION_PARTY = f"{CATALOG}.{SILVER_SCHEMA}.transaction_party"
 TBL_SUBMISSION_FILE = f"{CATALOG}.{SILVER_SCHEMA}.submission_file"
+# COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Filename regex extraction
@@ -59,21 +42,7 @@ TBL_SUBMISSION_FILE = f"{CATALOG}.{SILVER_SCHEMA}.submission_file"
 # MAGIC `<client_id>_<YYYYMMDDhhmmss>_<sequence>_<rest>.xml`.
 # MAGIC Keep the four output column names; redefine the logic for other regimes.
 
-# --------------------------------------------------------------------------
-# Filename regex extraction (customer-replaceable).
-#
-# Default MiFIR convention (e.g., 9795_20250729154019_3_sample_data.xml):
-#   <client_id>_<YYYYMMDDhhmmss>_<sequence>_<rest>.xml
-#
-# TODO (customer): customers with a different filename convention should
-# REPLACE THIS FUNCTION rather than editing the @dp.table definitions.
-# The four output column names must stay the same so downstream consumers
-# keep working; the extraction logic inside is yours to redefine.
-#
-# Set ENABLE_FILENAME_REGEX=false to skip extraction entirely (columns
-# emit NULL while preserving the schema).
-# --------------------------------------------------------------------------
-
+# COMMAND ----------
 _MIFIR_CLIENT_ID_PATTERN = r"^(\d+)_"
 _MIFIR_TIMESTAMP_PATTERN = r"^\d+_(\d{14})_"
 _MIFIR_SEQUENCE_PATTERN = r"^\d+_\d{14}_(\d+)_"
@@ -123,22 +92,14 @@ def _reporting_date(df: DataFrame) -> DataFrame:
             F.to_date(F.col("_file_modification_time")),
         ),
     )
+# COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Table 1 of 3: `submission_file`
 # MAGIC ~270 cols covering UVHeader + BizAppHeader (AppHdr + Sender/Recipient
 # MAGIC OrgId/FIId + Rltd mirror). MiFIR-specific.
 
-# --------------------------------------------------------------------------
-# Table 1 of 3: submission_file (MiFIR-specific file-level envelope)
-#
-# Built incrementally — each subsequent commit adds one logical section.
-# Final shape: ~270 columns covering UVHeader + full BizAppHeader (AppHdr
-# top-level + Sender Fr.OrgId/FIId + Recipient To.OrgId/FIId + Rltd
-# related-message mirror) per spec §4.3.
-# --------------------------------------------------------------------------
-
-
+# COMMAND ----------
 @dp.table(
     name=TBL_SUBMISSION_FILE,
     comment=(
@@ -560,21 +521,14 @@ def submission_file():
             F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Rltd.To.FIId.BrnchId.PstlAdr.AdrLine").alias("related_recipient_fi_branch_address_lines"),
         )
     )
+# COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Table 2 of 3: `transaction_party`
 # MAGIC Four `posexplode_outer` ops unioned, with `side` ∈ {BUYER, SELLER}
 # MAGIC and `party_role` ∈ {ACCT_OWNR, DCSN_MAKR} discriminators.
 
-# --------------------------------------------------------------------------
-# Table 2 of 3: transaction_party (unified party explode)
-#
-# Built via four posexplode_outer operations (one per array), unioned
-# with side ∈ {BUYER, SELLER} and party_role ∈ {ACCT_OWNR, DCSN_MAKR}
-# discriminators. Filtered to drop NULL rows from posexplode_outer.
-# --------------------------------------------------------------------------
-
-
+# COMMAND ----------
 @dp.table(
     name=TBL_TRANSACTION_PARTY,
     comment=(
@@ -686,22 +640,14 @@ def transaction_party():
         .unionByName(_explode_acct_ownr("SELLER", "New.Sellr.AcctOwnr"), allowMissingColumns=True)
         .unionByName(_explode_dcsn_makr("SELLER", "New.Sellr.DcsnMakr"), allowMissingColumns=True)
     )
+# COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Table 3 of 3: `transaction`
 # MAGIC Wide-flat fact, ~135 scalars + ~15 arrays. One row per `<Tx>`.
 # MAGIC `action_type` ∈ {NEW (full), CXL (cancel, only 3 shared fields populated)}.
 
-# --------------------------------------------------------------------------
-# Table 3 of 3: transaction (main fact, ~135 scalars + ~15 arrays)
-#
-# One row per <Tx> element. action_type discriminator: NEW (full
-# transaction with all fields) or CXL (cancellation, 3 shared fields
-# only — rest NULL). Built incrementally — each subsequent commit adds
-# one logical XSD section's columns to the .select(...) below.
-# --------------------------------------------------------------------------
-
-
+# COMMAND ----------
 @dp.table(
     name=TBL_TRANSACTION,
     comment=(

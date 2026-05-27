@@ -44,6 +44,13 @@ dmypy.json
 # Personal
 scratch/
 
+# Local outputs from .github/scripts/convert_notebooks.py — only created
+# in CI, but the script writes them to the project root so guard against
+# accidental commits when running it locally for testing.
+temp_*_fragment.html
+*.bak
+*.bak2
+
 # Local bundle config overrides (per-developer)
 resources/config/local/*
 !resources/config/local/*.template
