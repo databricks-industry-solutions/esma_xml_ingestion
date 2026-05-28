@@ -7,16 +7,16 @@ resources:
     MiFIR_Schema_Creation:
       name: "MiFIR Schema Creation"
       max_concurrent_runs: ${var.mifir_schema_max_concurrent_runs}
-      
+
       tasks:
         - task_key: mifir_schema_generation
           notebook_task:
             notebook_path: ../src/notebooks/0_1_xml_schema_xsd.py
             source: WORKSPACE
-            
+
       queue:
         enabled: true
-        
+
       parameters:
         - name: schemas_path
           default: "${var.mifir_schemas_path}"
@@ -29,10 +29,15 @@ resources:
         - name: schema_mappings_json
           default: "${var.mifir_schema_mappings_json}"
 
-  # === Spark Declarative Pipelines ===
+  # === Spark Declarative Pipeline (bronze + silver in one) ===
+  # The two notebooks stay separate on disk (xml_loader.py defines bronze
+  # tables; silver_mifir.py defines silver tables), but SDP loads both as
+  # libraries of the same pipeline so the bronze→silver DAG runs as one
+  # update: single cluster startup, overlapped execution where the DAG
+  # allows, one update_id / event log to monitor.
   pipelines:
-    mifir_xml_loader_pipeline:
-      name: "MiFIR XML Loader (SDP)"
+    mifir_pipeline:
+      name: "MiFIR (SDP)"
       catalog: ${var.mifir_catalog}
       schema: ${var.mifir_raw_schema}
       serverless: true
@@ -44,14 +49,18 @@ resources:
       libraries:
         - notebook:
             path: ../src/pipelines/xml_loader.py
+        - notebook:
+            path: ../src/pipelines/silver_mifir.py
 
       environment:
         dependencies:
           - lxml==5.3.0
 
       configuration:
+        # Shared
         catalog: ${var.mifir_catalog}
         raw_schema: ${var.mifir_raw_schema}
+        # Bronze (xml_loader.py)
         table_prefix: ${var.mifir_table_prefix}
         landing_path: ${var.mifir_landing_path}
         row_tag: ${var.mifir_row_tag}
@@ -63,26 +72,8 @@ resources:
         clean_source_mode: ${var.mifir_clean_source_mode}
         clean_source_move_destination: ${var.mifir_processed_path}
         clean_source_retention: ${var.mifir_clean_source_retention}
-
-    mifir_silver_pipeline:
-      name: "MiFIR Silver (domain-driven)"
-      catalog: ${var.mifir_catalog}
-      schema: ${var.mifir_raw_schema}
-      serverless: true
-      channel: CURRENT
-      development: false
-      photon: true
-      continuous: false
-
-      libraries:
-        - notebook:
-            path: ../src/pipelines/silver_mifir.py
-
-      configuration:
-        catalog: ${var.mifir_catalog}
-        raw_schema: ${var.mifir_raw_schema}
+        # Silver (silver_mifir.py)
         silver_schema: ${var.mifir_raw_schema}
         bronze_table: ${var.mifir_table_prefix}_raw
         file_headers_table: ${var.mifir_table_prefix}_file_headers
         regulation: "MIFIR"
-        enable_filename_regex: "true"

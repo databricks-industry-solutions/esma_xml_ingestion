@@ -71,8 +71,8 @@ databricks bundle deploy --target dev
 
 # Run a specific resource (job or pipeline)
 databricks bundle run EMIR_Schema_Creation --target dev
-databricks bundle run emir_xml_loader_pipeline --target dev
-databricks bundle run emir_silver_pipeline --target dev
+databricks bundle run emir_pipeline --target dev   # bronze + silver in one update
+databricks bundle run mifir_pipeline --target dev
 
 # Tear it down
 ./scripts/cleanup.sh

@@ -7,16 +7,16 @@ resources:
     EMIR_Schema_Creation:
       name: "EMIR Schema Creation"
       max_concurrent_runs: ${var.emir_schema_max_concurrent_runs}
-      
+
       tasks:
         - task_key: emir_schema_generation
           notebook_task:
             notebook_path: ../src/notebooks/0_1_xml_schema_xsd.py
             source: WORKSPACE
-            
+
       queue:
         enabled: true
-        
+
       parameters:
         - name: schemas_path
           default: "${var.emir_schemas_path}"
@@ -29,10 +29,15 @@ resources:
         - name: schema_mappings_json
           default: "${var.emir_schema_mappings_json}"
 
-  # === Spark Declarative Pipelines ===
+  # === Spark Declarative Pipeline (bronze + silver in one) ===
+  # The two notebooks stay separate on disk (xml_loader.py defines bronze
+  # tables; silver_emir.py defines silver tables), but SDP loads both as
+  # libraries of the same pipeline so the bronze→silver DAG runs as one
+  # update: single cluster startup, overlapped execution where the DAG
+  # allows, one update_id / event log to monitor.
   pipelines:
-    emir_xml_loader_pipeline:
-      name: "EMIR XML Loader (SDP)"
+    emir_pipeline:
+      name: "EMIR (SDP)"
       catalog: ${var.emir_catalog}
       schema: ${var.emir_raw_schema}
       serverless: true
@@ -44,14 +49,18 @@ resources:
       libraries:
         - notebook:
             path: ../src/pipelines/xml_loader.py
+        - notebook:
+            path: ../src/pipelines/silver_emir.py
 
       environment:
         dependencies:
           - lxml==5.3.0
 
       configuration:
+        # Shared
         catalog: ${var.emir_catalog}
         raw_schema: ${var.emir_raw_schema}
+        # Bronze (xml_loader.py)
         table_prefix: ${var.emir_table_prefix}
         landing_path: ${var.emir_landing_path}
         row_tag: ${var.emir_row_tag}
@@ -63,24 +72,7 @@ resources:
         clean_source_mode: ${var.emir_clean_source_mode}
         clean_source_move_destination: ${var.emir_processed_path}
         clean_source_retention: ${var.emir_clean_source_retention}
-
-    emir_silver_pipeline:
-      name: "EMIR Silver (domain-driven)"
-      catalog: ${var.emir_catalog}
-      schema: ${var.emir_raw_schema}
-      serverless: true
-      channel: CURRENT
-      development: false
-      photon: true
-      continuous: false
-
-      libraries:
-        - notebook:
-            path: ../src/pipelines/silver_emir.py
-
-      configuration:
-        catalog: ${var.emir_catalog}
-        raw_schema: ${var.emir_raw_schema}
+        # Silver (silver_emir.py)
         silver_schema: ${var.emir_raw_schema}
         bronze_table: ${var.emir_table_prefix}_raw
         file_headers_table: ${var.emir_table_prefix}_file_headers

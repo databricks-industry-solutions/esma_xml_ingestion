@@ -15,7 +15,11 @@
 #                                                 cleanSource MOVE destination (must
 #                                                 be in the same volume/location as
 #                                                 the landing path).
-#   5. (Optional) Add target overrides for development=true|false in
+#   5. Author a regulation-specific silver notebook
+#      (`src/pipelines/silver_<regulation>.py`) — see silver_emir.py /
+#      silver_mifir.py as references — and add it to the `libraries:` list
+#      below alongside `xml_loader.py`.
+#   6. (Optional) Add target overrides for development=true|false in
 #      databricks.yml under targets.{dev,prod}.resources.pipelines.
 
 resources:
@@ -47,10 +51,15 @@ resources:
         - name: schema_mappings_json
           default: "${var.new-type_schema_mappings_json}"
 
-  # === Spark Declarative Pipelines ===
+  # === Spark Declarative Pipeline (bronze + silver in one) ===
+  # The two notebooks stay separate on disk (xml_loader.py defines the
+  # regime-agnostic bronze tables; silver_<regulation>.py defines the
+  # regime-specific silver tables), but SDP loads both as libraries of the
+  # same pipeline so the bronze→silver DAG runs as one update: single
+  # cluster startup, overlapped execution, one update_id to monitor.
   pipelines:
-    new-type_xml_loader_pipeline:
-      name: "NEW_TYPE XML Loader (SDP)"
+    new-type_pipeline:
+      name: "NEW_TYPE (SDP)"
       catalog: ${var.new-type_catalog}
       schema: ${var.new-type_raw_schema}
       serverless: true
@@ -62,14 +71,19 @@ resources:
       libraries:
         - notebook:
             path: ../src/pipelines/xml_loader.py
+        # Add the silver notebook for this regulation:
+        # - notebook:
+        #     path: ../src/pipelines/silver_new-type.py
 
       environment:
         dependencies:
           - lxml==5.3.0
 
       configuration:
+        # Shared
         catalog: ${var.new-type_catalog}
         raw_schema: ${var.new-type_raw_schema}
+        # Bronze (xml_loader.py)
         table_prefix: ${var.new-type_table_prefix}
         landing_path: ${var.new-type_landing_path}
         row_tag: ${var.new-type_row_tag}
@@ -81,3 +95,8 @@ resources:
         clean_source_mode: ${var.new-type_clean_source_mode}
         clean_source_move_destination: ${var.new-type_processed_path}
         clean_source_retention: ${var.new-type_clean_source_retention}
+        # Silver (silver_<regulation>.py)
+        silver_schema: ${var.new-type_raw_schema}
+        bronze_table: ${var.new-type_table_prefix}_raw
+        file_headers_table: ${var.new-type_table_prefix}_file_headers
+        regulation: "NEW_TYPE"
