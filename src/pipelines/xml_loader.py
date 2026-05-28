@@ -389,9 +389,16 @@ def quarantine():
     cluster_by_auto=True,
 )
 def file_headers():
+    # No filter on corrupted_record: we want ONE row per ingested file regardless
+    # of XSD-validation outcome. The lxml UDF reads the file from disk via
+    # file_path (a _metadata column, populated even when rowValidationXSDPath
+    # flags every row) and returns the BAH + Document header. Files that are
+    # not well-formed XML at all will get hdr_pyld_metadata=NULL (the UDF is
+    # lenient). Net effect: submission_file always lists every file we
+    # received, joinable to {prefix}_quarantine to see which ones had row-
+    # level XSD failures.
     return (
         spark.readStream.table(TBL_RAW)
-        .filter(F.col("corrupted_record").isNull())
         .select("file_path", "file_name", "_file_modification_time", "_ingested_at")
         .dropDuplicates(["file_path"])
         .select(
